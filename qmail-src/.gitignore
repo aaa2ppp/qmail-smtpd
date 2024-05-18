@@ -1,0 +1,5 @@
+.check
+.fetch
+.unpack
+*.gz
+qmail-1.03/
