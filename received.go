@@ -71,4 +71,5 @@ func received(
 	qmail_puts(qqt, "; ")
 	dt := time.Now()
 	qmail_puts(qqt, dt.Format(time.RFC822Z))
+	qmail_putc(qqt, '\n')
 }

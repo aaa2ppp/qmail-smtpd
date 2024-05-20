@@ -1,0 +1,11 @@
+ehlo localhost
+mail <masha>
+rcpt <yasha>
+data
+From: "Masha" <masha>
+To: "Yasha" <yasha>
+Subject: Hello
+
+Hello, Yasha!
+.
+quit

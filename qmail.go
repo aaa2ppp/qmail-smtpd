@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"io"
 	"os"
 	"os/exec"
 )
@@ -18,32 +17,49 @@ type tQmail struct {
 	ss  *bufio.Writer
 }
 
-func qmail_open(qq *tQmail) int {
-	var pi io.WriteCloser
-	var po io.ReadCloser
-	var err error
+func qmail_open(qq *tQmail) (r int) {
+	defer func() {
+		if r == -1 {
+			qq.cmd = nil
+			if qq.fdm != nil {
+				qq.fdm.Close()
+			}
+			if qq.fde != nil {
+				qq.fde.Close()
+			}
+		}
+	}()
+
 	qq.cmd = exec.Command(binqqargs[0], binqqargs[1:]...)
 	qq.cmd.Dir = auto_qmail
 
-	// fd(0)
-	if pi, err = qq.cmd.StdinPipe(); err != nil {
-		return -1
-	}
-	// fd(1)
-	if po, err = qq.cmd.StdoutPipe(); err != nil {
-		return -1
+	{
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			return -1
+		}
+		defer pr.Close() // TODO: close pw on children side
+		qq.cmd.Stdin = pr
+		qq.fdm = pw
 	}
 
-	// XXX: qmail-queue reads from fd(0) and (!) from fd(1)
-	// to possible write to both fd we convert pi and po interfaces to os.File
-	qq.fdm = pi.(*os.File)
-	qq.fde = po.(*os.File)
+	{
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			return -1
+		}
+		defer pr.Close()   // TODO: close pw on children side
+		qq.cmd.Stdout = pr // yes, qmail-queue reads from fd=1 (stdout)
+		qq.fde = pw
+	}
+
+	qq.cmd.Stderr = os.Stderr
+
+	if err := qq.cmd.Start(); err != nil {
+		return -1
+	}
 
 	qq.ss = bufio.NewWriter(qq.fdm)
-
-	if err = qq.cmd.Start(); err != nil {
-		return -1
-	}
 	return 0
 }
 
@@ -76,13 +92,11 @@ func qmail_from(qq *tQmail, s string) {
 		qq.flagerr = true
 	}
 	qq.fdm.Close()
-
 	qq.ss = bufio.NewWriter(qq.fde)
+
 	qmail_putc(qq, 'F')
 	qmail_puts(qq, s)
 	qmail_putc(qq, 0)
-
-	qq.flagerr = true
 }
 
 func qmail_to(qq *tQmail, s string) {
@@ -92,7 +106,7 @@ func qmail_to(qq *tQmail, s string) {
 }
 
 func qmail_close(qq *tQmail) string {
-	qmail_puts(qq, "\x00")
+	qmail_putc(qq, 0)
 	if !qq.flagerr {
 		if err := qq.ss.Flush(); err != nil {
 			qq.flagerr = true
