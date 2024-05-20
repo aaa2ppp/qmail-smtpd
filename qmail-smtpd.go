@@ -284,7 +284,7 @@ func addrallowed() bool {
 var seenmail bool
 var flagbarf bool /* defined if seenmail */
 var mailfrom string
-var rcptto string
+var rcptto []string
 
 func smtp_helo(arg string) {
 	smtp_greet("250 ")
@@ -312,7 +312,7 @@ func smtp_mail(arg string) {
 	}
 	flagbarf = bmfcheck()
 	seenmail = true
-	rcptto = ""
+	rcptto = rcptto[:0]
 	mailfrom = addr
 	out("250 ok\r\n")
 }
@@ -338,7 +338,7 @@ func smtp_rcpt(arg string) {
 			return
 		}
 	}
-	rcptto = "T" + addr
+	rcptto = append(rcptto, addr)
 	out("250 ok\r\n")
 }
 
@@ -516,8 +516,11 @@ func smtp_data(_ string) {
 	if too_many_hops {
 		qmail_fail(&qqt)
 	}
+	
 	qmail_from(&qqt, mailfrom)
-	qmail_puts(&qqt, rcptto)
+	for _, it := range rcptto {
+		qmail_to(&qqt, it)
+	}
 
 	qqx := qmail_close(&qqt)
 	if qqx == "" {
