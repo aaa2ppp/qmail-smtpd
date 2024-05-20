@@ -158,7 +158,10 @@ func setup() {
 	// if (x) { scan_ulong(x,&u); databytes = u; }
 	// if (!(databytes + 1)) --databytes;  // WTF: if databytes == -1 then databytes = -2 ?
 	if x := os.Getenv("DATABYTES"); x != "" {
-		databytes, _ = strconv.Atoi(x)
+		_, u := scan_ulong(x)
+		if u != 0 {
+			databytes = int(u)
+		}
 	}
 	if databytes+1 == 0 { // WTF?
 		databytes--
@@ -516,7 +519,7 @@ func smtp_data(_ string) {
 	if too_many_hops {
 		qmail_fail(&qqt)
 	}
-	
+
 	qmail_from(&qqt, mailfrom)
 	for _, it := range rcptto {
 		qmail_to(&qqt, it)

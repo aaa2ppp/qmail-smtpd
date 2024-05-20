@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -63,8 +62,8 @@ func control_readint(fn string) (int, int) {
 	case -1:
 		return 0, -1
 	}
-	u, err := strconv.ParseUint(line, 0, 32) // xxx
-	if err != nil {
+	_, u := scan_ulong(line)
+	if u == 0 {
 		return 0, 0
 	}
 	return int(u), 1
