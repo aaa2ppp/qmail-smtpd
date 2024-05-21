@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"qmail-smtpd/internal/commands"
-	"qmail-smtpd/internal/constmap"
 	"qmail-smtpd/internal/control"
+	"qmail-smtpd/internal/control/badmailfrom"
 	"qmail-smtpd/internal/control/ipme"
 	"qmail-smtpd/internal/control/rcpthosts"
 	"qmail-smtpd/internal/qmail"
@@ -117,8 +117,6 @@ func dohelo(arg string) {
 
 var liphostok bool
 var liphost string
-var bmfok bool
-var mapbmf constmap.Constmap
 
 func setup() {
 	if control.Init() == -1 {
@@ -147,16 +145,12 @@ func setup() {
 		timeout = time.Duration(i) * time.Second
 	}
 
-	// xxx
 	if r := rcpthosts.Init(); r == -1 {
 		die_control()
 	}
 
-	if ss, r := control.ReadFile("control/badmailfrom", false); r == -1 {
+	if r := badmailfrom.Init(); r == -1 {
 		die_control()
-	} else if r == 1 {
-		mapbmf = constmap.New(ss)
-		bmfok = true
 	}
 
 	if i, r := control.ReadInt("control/databytes"); r == -1 {
@@ -272,21 +266,6 @@ func addrparse(arg string) int {
 	return 1
 }
 
-func bmfcheck() bool {
-	if !bmfok {
-		return false
-	}
-	if mapbmf.Contains(addr) {
-		return true
-	}
-	if j := strings.IndexByte(addr, '@'); j != -1 {
-		if mapbmf.Contains(addr[j+1:]) {
-			return true
-		}
-	}
-	return false
-}
-
 func addrallowed() bool {
 	if !rcpthosts.Allowed(addr) {
 		die_control()
@@ -323,7 +302,7 @@ func smtp_mail(arg string) {
 		err_syntax()
 		return
 	}
-	flagbarf = bmfcheck()
+	flagbarf = !badmailfrom.Allowed(addr)
 	seenmail = true
 	rcptto = rcptto[:0]
 	mailfrom = addr
