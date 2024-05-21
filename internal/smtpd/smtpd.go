@@ -3,7 +3,7 @@ package smtpd
 import (
 	"bufio"
 	"bytes"
-	"errors"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -16,147 +16,150 @@ import (
 	"qmail-smtpd/internal/control/ipme"
 	"qmail-smtpd/internal/control/rcpthosts"
 	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/safeio"
 	"qmail-smtpd/internal/scan"
 )
 
-func _exit(code int) { os.Exit(code) }
+const (
+	maxHops        = 100
+	defaultTimeout = 1200 * time.Second // WTF: why so many?
+)
 
-const MAXHOPS = 100
+type Smtpd struct {
+	greeting      string
+	databytes     int
+	timeout       time.Duration
+	remoteip      string
+	remotehost    string
+	remoteinfo    string
+	local         string
+	relayclient   string
+	relayclientok bool
+	helohost      string
+	fakehelo      string /* pointer into helohost, or 0 */
+	liphostok     bool
+	liphost       string
 
-var databytes = 0
-var timeout = 1200 * time.Second // WTF: why so many?
+	ssin  *bufio.Reader
+	ssout *bufio.Writer
 
-type safeWriter os.File
-
-func (r *safeWriter) Write(b []byte) (n int, err error) {
-	// we will be died when the timeout expires, so there is no point in buffering the channel
-	done := make(chan struct{})
-	go func() {
-		n, err = (*os.File)(r).Write(b)
-		done <- struct{}{}
-	}()
-
-	tm := time.NewTimer(timeout)
-	select {
-	case <-tm.C:
-		_exit(1)
-		return 0, errors.New("write timeout") // _exit never returns so this will never happen
-	case <-done:
-		tm.Stop()
-		return n, err
-	}
+	seenmail        bool
+	flagbarf        bool /* defined if seenmail */
+	mailfrom        string
+	rcptto          []string
+	addr            string
+	qqt             *qmail.Qmail
+	bytestooverflow uint
 }
 
-var ssout = bufio.NewWriter((*safeWriter)(os.Stdout))
-
-func flush() {
-	if err := ssout.Flush(); err != nil {
+func (sd *Smtpd) flush() {
+	if err := sd.ssout.Flush(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func out(s string) {
-	if _, err := ssout.WriteString(s); err != nil {
+func (sd *Smtpd) out(s string) {
+	if _, err := sd.ssout.WriteString(s); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func die_read()     { _exit(1) }
-func die_alarm()    { out("451 timeout (#4.4.2)\r\n"); flush(); _exit(1) }
-func die_nomem()    { out("421 out of memory (#4.3.0)\r\n"); flush(); _exit(1) }
-func die_control()  { out("421 unable to read controls (#4.3.0)\r\n"); flush(); _exit(1) }
-func die_ipme()     { out("421 unable to figure out my IP addresses (#4.3.0)\r\n"); flush(); _exit(1) }
-func straynewline() { out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n"); flush(); _exit(1) }
-
-func err_bmf() { out("553 sorry, your envelope sender is in my badmailfrom list (#5.7.1)\r\n") }
-func err_nogateway() {
-	out("553 sorry, that domain isn't in my list of allowed rcpthosts (#5.7.1)\r\n")
+func (sd *Smtpd) die_read()  { _exit(1) }
+func (sd *Smtpd) die_alarm() { sd.out("451 timeout (#4.4.2)\r\n"); sd.flush(); _exit(1) }
+func (sd *Smtpd) die_nomem() { sd.out("421 out of memory (#4.3.0)\r\n"); sd.flush(); _exit(1) }
+func (sd *Smtpd) die_control() {
+	sd.out("421 unable to read controls (#4.3.0)\r\n")
+	sd.flush()
+	_exit(1)
 }
-func err_unimpl()   { out("502 unimplemented (#5.5.1)\r\n") }
-func err_syntax()   { out("555 syntax error (#5.5.4)\r\n") }
-func err_wantmail() { out("503 MAIL first (#5.5.1)\r\n") }
-func err_wantrcpt() { out("503 RCPT first (#5.5.1)\r\n") }
-func err_noop()     { out("250 ok\r\n") }
-func err_vrfy()     { out("252 send some mail, i'll try my best\r\n") }
-func err_qqt()      { out("451 qqt failure (#4.3.0)\r\n") }
-
-var greeting string
-
-func smtp_greet(code string) {
-	out(code)
-	out(greeting)
+func (sd *Smtpd) die_ipme() {
+	sd.out("421 unable to figure out my IP addresses (#4.3.0)\r\n")
+	sd.flush()
+	_exit(1)
+}
+func (sd *Smtpd) straynewline() {
+	sd.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
+	sd.flush()
+	_exit(1)
 }
 
-func smtp_help(_ string) {
-	out("214 qmail home page: http://pobox.com/~djb/qmail.html\r\n")
+func (sd *Smtpd) err_bmf() {
+	sd.out("553 sorry, your envelope sender is in my badmailfrom list (#5.7.1)\r\n")
+}
+func (sd *Smtpd) err_nogateway() {
+	sd.out("553 sorry, that domain isn't in my list of allowed rcpthosts (#5.7.1)\r\n")
+}
+func (sd *Smtpd) err_unimpl()   { sd.out("502 unimplemented (#5.5.1)\r\n") }
+func (sd *Smtpd) err_syntax()   { sd.out("555 syntax error (#5.5.4)\r\n") }
+func (sd *Smtpd) err_wantmail() { sd.out("503 MAIL first (#5.5.1)\r\n") }
+func (sd *Smtpd) err_wantrcpt() { sd.out("503 RCPT first (#5.5.1)\r\n") }
+func (sd *Smtpd) err_noop()     { sd.out("250 ok\r\n") }
+func (sd *Smtpd) err_vrfy()     { sd.out("252 send some mail, i'll try my best\r\n") }
+func (sd *Smtpd) err_qqt()      { sd.out("451 qqt failure (#4.3.0)\r\n") }
+
+func (sd *Smtpd) smtp_greet(code string) {
+	sd.out(code)
+	sd.out(sd.greeting)
 }
 
-func smtp_quit(_ string) {
-	smtp_greet("221 ")
-	out("\r\n")
-	flush()
+func (sd *Smtpd) smtp_help(_ string) {
+	sd.out("214 qmail home page: http://pobox.com/~djb/qmail.html\r\n")
+}
+
+func (sd *Smtpd) smtp_quit(_ string) {
+	sd.smtp_greet("221 ")
+	sd.out("\r\n")
+	sd.flush()
 	_exit(0)
 }
 
-var remoteip string
-var remotehost string
-var remoteinfo string
-var local string
-var relayclient string
-var relayclientok bool
-
-var helohost string
-var fakehelo string /* pointer into helohost, or 0 */
-
-func dohelo(arg string) {
-	helohost = arg
-	if !strings.EqualFold(remotehost, helohost) {
-		fakehelo = helohost
+func (sd *Smtpd) dohelo(arg string) {
+	sd.helohost = arg
+	if !strings.EqualFold(sd.remotehost, sd.helohost) {
+		sd.fakehelo = sd.helohost
 	}
 }
 
-var liphostok bool
-var liphost string
-
-func setup() {
+func (sd *Smtpd) setup() {
 	if control.Init() == -1 {
-		die_control()
+		sd.die_control()
 	}
 
 	if s, r := control.Rldef("control/smtpgreeting", true, ""); r != 1 {
-		die_control()
+		sd.die_control()
 	} else {
-		greeting = s
+		sd.greeting = s
 	}
 
 	if s, r := control.Rldef("control/localiphost", true, ""); r == -1 {
-		die_control()
+		sd.die_control()
 	} else if r == 1 {
-		liphost = s
-		liphostok = true
+		sd.liphost = s
+		sd.liphostok = true
 	}
 
+	sd.timeout = defaultTimeout
 	if i, r := control.ReadInt("control/timeoutsmtpd"); r == -1 {
-		die_control()
+		sd.die_control()
 	} else if r == 1 {
 		if i <= 0 {
 			i = 1
 		}
-		timeout = time.Duration(i) * time.Second
+		sd.timeout = time.Duration(i) * time.Second
 	}
 
 	if r := rcpthosts.Init(); r == -1 {
-		die_control()
+		sd.die_control()
 	}
 
 	if r := badmailfrom.Init(); r == -1 {
-		die_control()
+		sd.die_control()
 	}
 
 	if i, r := control.ReadInt("control/databytes"); r == -1 {
-		die_control()
+		sd.die_control()
 	} else if r == 1 {
-		databytes = i
+		sd.databytes = i
 	}
 
 	// x = env_get("DATABYTES");
@@ -165,40 +168,38 @@ func setup() {
 	if x := os.Getenv("DATABYTES"); x != "" {
 		_, u := scan.ScanUlong(x)
 		if u != 0 {
-			databytes = int(u)
+			sd.databytes = int(u)
 		}
 	}
-	if databytes+1 == 0 { // WTF?
-		databytes--
+	if sd.databytes+1 == 0 { // WTF?
+		sd.databytes--
 	}
 
-	remoteip = os.Getenv("TCPREMOTEIP")
-	if remoteip == "" {
-		remoteip = "unknown"
+	sd.remoteip = os.Getenv("TCPREMOTEIP")
+	if sd.remoteip == "" {
+		sd.remoteip = "unknown"
 	}
 
-	local = os.Getenv("TCPLOCALHOST")
-	if local == "" {
-		local = os.Getenv("TCPLOCALIP")
+	sd.local = os.Getenv("TCPLOCALHOST")
+	if sd.local == "" {
+		sd.local = os.Getenv("TCPLOCALIP")
 	}
-	if local == "" {
-		local = "unknown"
-	}
-
-	remotehost = os.Getenv("TCPREMOTEHOST")
-	if remotehost == "" {
-		remotehost = "unknown"
+	if sd.local == "" {
+		sd.local = "unknown"
 	}
 
-	remoteinfo = os.Getenv("TCPREMOTEINFO")
-	relayclient, relayclientok = os.LookupEnv("RELAYCLIENT")
+	sd.remotehost = os.Getenv("TCPREMOTEHOST")
+	if sd.remotehost == "" {
+		sd.remotehost = "unknown"
+	}
 
-	dohelo(remotehost)
+	sd.remoteinfo = os.Getenv("TCPREMOTEINFO")
+	sd.relayclient, sd.relayclientok = os.LookupEnv("RELAYCLIENT")
+
+	sd.dohelo(sd.remotehost)
 }
 
-var addr string
-
-func addrparse(arg string) int {
+func (sd *Smtpd) addrparse(arg string) int {
 	terminator := '>'
 
 	if i := strings.IndexByte(arg, '<'); i != -1 {
@@ -220,13 +221,13 @@ func addrparse(arg string) int {
 		}
 	}
 
-	var addrbuf []byte
+	var addr []byte
 	var flagesc bool
 	var flagquoted bool
 
 	for _, ch := range []byte(arg) { /* copy arg to addr, stripping quotes */
 		if flagesc {
-			addrbuf = append(addrbuf, ch)
+			addr = append(addr, ch)
 			flagesc = false
 		} else {
 			if !flagquoted && ch == byte(terminator) {
@@ -238,141 +239,108 @@ func addrparse(arg string) int {
 			case '"':
 				flagquoted = !flagquoted
 			default:
-				addrbuf = append(addrbuf, ch)
+				addr = append(addr, ch)
 			}
 		}
 	}
 	/* could check for termination failure here, but why bother? */
 
-	if liphostok {
-		i := bytes.LastIndexByte(addrbuf, '@')
+	if sd.liphostok {
+		i := bytes.LastIndexByte(addr, '@')
 		if i != -1 { /* if not, partner should go read rfc 821 */
-			if i+1 < len(addrbuf) && addrbuf[i+1] == '[' {
-				l, ip := scan.ScanIPBracket(unsafeString(addrbuf[i+1:]))
-				if i+1+l == len(addrbuf) {
+			if i+1 < len(addr) && addr[i+1] == '[' {
+				l, ip := scan.ScanIPBracket(unsafeString(addr[i+1:]))
+				if i+1+l == len(addr) {
 					if ipme.Is(ip) {
-						addrbuf = append(addrbuf[:i+1], liphost...)
+						addr = append(addr[:i+1], sd.liphost...)
 					}
 				}
 			}
 		}
 	}
 
-	if len(addrbuf) > 900 {
+	if len(addr) > 900 {
 		return 0
 	}
 
-	addr = string(addrbuf)
+	sd.addr = string(addr)
 	return 1
 }
 
-func addrallowed() bool {
-	if !rcpthosts.Allowed(addr) {
-		die_control()
+func (sd *Smtpd) addrallowed() bool {
+	if !rcpthosts.Allowed(sd.addr) {
+		sd.die_control()
 	}
 	return true
 }
 
-var seenmail bool
-var flagbarf bool /* defined if seenmail */
-var mailfrom string
-var rcptto []string
-
-func smtp_helo(arg string) {
-	smtp_greet("250 ")
-	out("\r\n")
-	seenmail = false
-	dohelo(arg)
+func (sd *Smtpd) smtp_helo(arg string) {
+	sd.smtp_greet("250 ")
+	sd.out("\r\n")
+	sd.seenmail = false
+	sd.dohelo(arg)
 }
 
-func smtp_ehlo(arg string) {
-	smtp_greet("250-")
-	out("\r\n250-PIPELINING\r\n250 8BITMIME\r\n")
-	seenmail = false
-	dohelo(arg)
+func (sd *Smtpd) smtp_ehlo(arg string) {
+	sd.smtp_greet("250-")
+	sd.out("\r\n250-PIPELINING\r\n250 8BITMIME\r\n")
+	sd.seenmail = false
+	sd.dohelo(arg)
 }
 
-func smtp_rset(args string) {
-	seenmail = false
-	out("250 flushed\r\n")
+func (sd *Smtpd) smtp_rset(args string) {
+	sd.seenmail = false
+	sd.out("250 flushed\r\n")
 }
 
-func smtp_mail(arg string) {
-	if r := addrparse(arg); r == 0 {
-		err_syntax()
+func (sd *Smtpd) smtp_mail(arg string) {
+	if r := sd.addrparse(arg); r == 0 {
+		sd.err_syntax()
 		return
 	}
-	flagbarf = !badmailfrom.Allowed(addr)
-	seenmail = true
-	rcptto = rcptto[:0]
-	mailfrom = addr
-	out("250 ok\r\n")
+	sd.flagbarf = !badmailfrom.Allowed(sd.addr)
+	sd.seenmail = true
+	sd.rcptto = sd.rcptto[:0]
+	sd.mailfrom = sd.addr
+	sd.out("250 ok\r\n")
 }
 
-func smtp_rcpt(arg string) {
-	if !seenmail {
-		err_wantmail()
+func (sd *Smtpd) smtp_rcpt(arg string) {
+	if !sd.seenmail {
+		sd.err_wantmail()
 		return
 	}
-	if r := addrparse(arg); r == 0 {
-		err_syntax()
+	if r := sd.addrparse(arg); r == 0 {
+		sd.err_syntax()
 		return
 	}
-	if flagbarf {
-		err_bmf()
+	if sd.flagbarf {
+		sd.err_bmf()
 		return
 	}
-	if relayclientok {
-		addr += relayclient
+	if sd.relayclientok {
+		sd.addr += sd.relayclient
 	} else {
-		if !addrallowed() {
-			err_nogateway()
+		if !sd.addrallowed() {
+			sd.err_nogateway()
 			return
 		}
 	}
-	rcptto = append(rcptto, addr)
-	out("250 ok\r\n")
+	sd.rcptto = append(sd.rcptto, sd.addr)
+	sd.out("250 ok\r\n")
 }
 
-type safeReader os.File
-
-func (r *safeReader) Read(b []byte) (n int, err error) {
-	flush()
-
-	// we will be died when the timeout expires, so there is no point in buffering the channel
-	done := make(chan struct{})
-	go func() {
-		n, err = (*os.File)(r).Read(b)
-		done <- struct{}{}
-	}()
-
-	tm := time.NewTimer(timeout)
-	select {
-	case <-tm.C:
-		die_alarm()
-		return 0, errors.New("read timeout") // die_* never returns so this will never happen
-	case <-done:
-		tm.Stop()
-		return n, err
-	}
-}
-
-var ssin = bufio.NewReader((*safeReader)(os.Stdin))
-
-var qqt *qmail.Qmail
-var bytestooverflow uint
-
-func put(ch byte) {
-	if bytestooverflow != 0 {
-		bytestooverflow--
-		if bytestooverflow == 0 {
-			qqt.Fail()
+func (sd *Smtpd) put(ch byte) {
+	if sd.bytestooverflow != 0 {
+		sd.bytestooverflow--
+		if sd.bytestooverflow == 0 {
+			sd.qqt.Fail()
 		}
 	}
-	qqt.Putc(ch)
+	sd.qqt.Putc(ch)
 }
 
-func blast() int {
+func (sd *Smtpd) blast() int {
 	hops := 0
 	state := 1
 	flaginheader := true
@@ -382,7 +350,13 @@ func blast() int {
 	flagmaybez := true /* 1 if this line might match DELIVERED, if fih */
 
 	for {
-		ch, _ := ssin.ReadByte()
+		ch, err := sd.ssin.ReadByte()
+		if err != nil {
+			if err == safeio.ErrIOTimeout {
+				sd.die_alarm()
+			}
+			sd.die_read()
+		}
 
 		if flaginheader {
 			if pos < 9 {
@@ -419,7 +393,7 @@ func blast() int {
 		switch state {
 		case 0:
 			if ch == '\n' {
-				straynewline()
+				sd.straynewline()
 			}
 			if ch == '\r' {
 				state = 4
@@ -427,7 +401,7 @@ func blast() int {
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				straynewline()
+				sd.straynewline()
 			}
 			if ch == '.' {
 				state = 2
@@ -440,7 +414,7 @@ func blast() int {
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				straynewline()
+				sd.straynewline()
 			}
 			if ch == '\r' {
 				state = 3
@@ -451,8 +425,8 @@ func blast() int {
 			if ch == '\n' {
 				return hops
 			}
-			put('.')
-			put('\r')
+			sd.put('.')
+			sd.put('\r')
 			if ch == '\r' {
 				state = 4
 				continue
@@ -464,106 +438,114 @@ func blast() int {
 				break
 			}
 			if ch != '\r' {
-				put('\r')
+				sd.put('\r')
 				state = 0
 			}
 		}
 
-		put(ch)
+		sd.put(ch)
 	}
 }
 
-func acceptmessage(qp int) {
+func (sd *Smtpd) acceptmessage(qp int) {
 	when := time.Now()
-	out("250 ok ")
-	out(strconv.Itoa(int(when.Unix())))
-	out(" qt ")
-	out(strconv.Itoa(qp))
-	out("\r\n")
+	sd.out("250 ok ")
+	sd.out(strconv.Itoa(int(when.Unix())))
+	sd.out(" qt ")
+	sd.out(strconv.Itoa(qp))
+	sd.out("\r\n")
 }
 
-func smtp_data(_ string) {
-	if !seenmail {
-		err_wantmail()
+func (sd *Smtpd) smtp_data(_ string) {
+	if !sd.seenmail {
+		sd.err_wantmail()
 		return
 	}
-	if len(rcptto) == 0 {
-		err_wantrcpt()
+	if len(sd.rcptto) == 0 {
+		sd.err_wantrcpt()
 		return
 	}
-	seenmail = false
-	if databytes != 0 {
-		bytestooverflow = uint(databytes) + 1
+	sd.seenmail = false
+	if sd.databytes != 0 {
+		sd.bytestooverflow = uint(sd.databytes) + 1
 	}
 	var err error
-	if qqt, err = qmail.Open(); err != nil {
-		err_qqt()
+	if sd.qqt, err = qmail.Open(); err != nil {
+		sd.err_qqt()
 		return
 	}
-	qp := qqt.Pid()
-	out("354 go ahead\r\n")
+	qp := sd.qqt.Pid()
+	sd.out("354 go ahead\r\n")
 
-	qqt.Received("SMTP", local, remoteip, remotehost, remoteinfo, fakehelo)
-	hops := blast()
-	too_many_hops := hops >= MAXHOPS
+	sd.qqt.Received("SMTP", sd.local, sd.remoteip, sd.remotehost, sd.remoteinfo, sd.fakehelo)
+	hops := sd.blast()
+	too_many_hops := hops >= maxHops
 	if too_many_hops {
-		qqt.Fail()
+		sd.qqt.Fail()
 	}
 
-	qqt.From(mailfrom)
-	for _, it := range rcptto {
-		qqt.To(it)
+	sd.qqt.From(sd.mailfrom)
+	for _, it := range sd.rcptto {
+		sd.qqt.To(it)
 	}
 
-	qqx := qqt.Close()
+	qqx := sd.qqt.Close()
 	if qqx == "" {
-		acceptmessage(qp)
+		sd.acceptmessage(qp)
 		return
 	}
 	if too_many_hops {
-		out("554 too many hops, this message is looping (#5.4.6)\r\n")
+		sd.out("554 too many hops, this message is looping (#5.4.6)\r\n")
 		return
 	}
-	if databytes != 0 && bytestooverflow == 0 {
-		out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
+	if sd.databytes != 0 && sd.bytestooverflow == 0 {
+		sd.out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
 		return
 	}
 	if qqx[0] == 'D' {
-		out("554 ")
+		sd.out("554 ")
 	} else {
-		out("451 ")
+		sd.out("451 ")
 	}
-	out(qqx[1:])
-	out("\r\n")
+	sd.out(qqx[1:])
+	sd.out("\r\n")
 }
 
 func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-var Commands = []commands.Command{
-	{"rcpt", smtp_rcpt, nil},
-	{"mail", smtp_mail, nil},
-	{"data", smtp_data, flush},
-	{"quit", smtp_quit, flush},
-	{"helo", smtp_helo, flush},
-	{"ehlo", smtp_ehlo, flush},
-	{"rset", smtp_rset, nil},
-	{"help", smtp_help, flush},
-	{"noop", cmd_fun(err_noop), flush},
-	{"vrfy", cmd_fun(err_vrfy), flush},
-	{"", cmd_fun(err_unimpl), flush},
-}
-
-func Run() {
-	setup()
+func (sd *Smtpd) Run(r io.Reader, w io.Writer) {
+	sd.setup()
 	if !ipme.Init() {
-		die_ipme()
+		sd.die_ipme()
 	}
-	smtp_greet("200 ")
-	out(" ESMTP\r\n")
-	if commands.Loop(ssin, Commands) == 0 {
-		die_read()
+
+	sd.ssin = bufio.NewReader(safeio.NewReader(r, sd.timeout, sd.flush))
+	sd.ssout = bufio.NewWriter(safeio.NewWriter(w, sd.timeout))
+
+	sd.smtp_greet("200 ")
+	sd.out(" ESMTP\r\n")
+
+	cmds := []commands.Command{
+		{"rcpt", sd.smtp_rcpt, nil},
+		{"mail", sd.smtp_mail, nil},
+		{"data", sd.smtp_data, sd.flush},
+		{"quit", sd.smtp_quit, sd.flush},
+		{"helo", sd.smtp_helo, sd.flush},
+		{"ehlo", sd.smtp_ehlo, sd.flush},
+		{"rset", sd.smtp_rset, nil},
+		{"help", sd.smtp_help, sd.flush},
+		{"noop", cmd_fun(sd.err_noop), sd.flush},
+		{"vrfy", cmd_fun(sd.err_vrfy), sd.flush},
+		{"", cmd_fun(sd.err_unimpl), sd.flush},
 	}
-	die_nomem()
+
+	if err := commands.Loop(sd.ssin, cmds); err != nil {
+		if err == safeio.ErrIOTimeout {
+			sd.die_alarm()
+		}
+		sd.die_read()
+	}
+	sd.die_nomem()
 }

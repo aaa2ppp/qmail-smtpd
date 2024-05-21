@@ -16,5 +16,6 @@ func main() {
 	if err := os.Chdir(config.AutoQmail); err != nil {
 		log.Fatal(err)
 	}
-	smtpd.Run()
+	var sd smtpd.Smtpd
+	sd.Run(os.Stdin, os.Stdout)
 }

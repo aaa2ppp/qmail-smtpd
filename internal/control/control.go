@@ -42,6 +42,7 @@ func ReadLine(fn string) (string, int) {
 	return sa, 1
 }
 
+// TODO: rename ReadLineDef
 func Rldef(fn string, flagme bool, def string) (string, int) {
 	sa, r := ReadLine(fn)
 	if r != 0 {

@@ -14,7 +14,7 @@ type reader interface {
 	ReadString(byte) (string, error)
 }
 
-func Loop(r reader, c []Command) int {
+func Loop(r reader, c []Command) error {
 	if len(c) == 0 || c[len(c)-1].Name != "" {
 		panic("name of last command must be empty")
 	}
@@ -22,7 +22,7 @@ func Loop(r reader, c []Command) int {
 	for {
 		cmd, err := r.ReadString('\n')
 		if err != nil {
-			return 0
+			return err
 		}
 
 		cmd = cmd[:len(cmd)-1]
