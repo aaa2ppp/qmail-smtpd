@@ -1,4 +1,13 @@
+helo
 ehlo localhost
+rcpt <pasha>
+rset
+mail <masha>
+data
+rset
+mail <pasha>
+rcpt <yasha>
+rset
 mail <masha>
 rcpt <yasha>
 data
@@ -8,4 +17,5 @@ Subject: Hello
 
 Hello, Yasha!
 .
+rset
 quit

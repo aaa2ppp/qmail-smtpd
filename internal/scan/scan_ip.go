@@ -1,12 +1,13 @@
-package main
+package scan
 
-type ip_address struct {
+// TODO: не наместе определение этой структуры
+type IPAddress struct {
 	d [4]byte
 }
 
-func ip_scan(s string) (int, ip_address) {
+func ScanIP(s string) (int, IPAddress) {
 	var l int
-	var ip ip_address
+	var ip IPAddress
 
 	for octet := 0; octet < 4; octet++ {
 		if octet > 0 {
@@ -17,7 +18,7 @@ func ip_scan(s string) (int, ip_address) {
 			l++
 		}
 
-		i, u := scan_ulong(s)
+		i, u := ScanUlong(s)
 		if i == 0 {
 			return 0, ip
 		}
@@ -29,14 +30,14 @@ func ip_scan(s string) (int, ip_address) {
 	return l, ip
 }
 
-func ip_scanbracket(s string) (int, ip_address) {
+func ScanIPBracket(s string) (int, IPAddress) {
 	var l int
-	var ip ip_address
+	var ip IPAddress
 
 	if len(s) == 0 || s[0] != '[' {
 		return 0, ip
 	}
-	l, ip = ip_scan(s[1:])
+	l, ip = ScanIP(s[1:])
 	if l == 0 {
 		return 0, ip
 	}

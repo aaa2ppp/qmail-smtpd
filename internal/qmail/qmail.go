@@ -1,115 +1,131 @@
-package main
+package qmail
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"os/exec"
 )
 
 var binqqargs = []string{"bin/qmail-queue"}
 
-type tQmail struct {
-	cmd     *exec.Cmd
-	flagerr bool
-	//pid     uint
-	fdm *os.File
-	fde *os.File
-	ss  *bufio.Writer
+type Qmail struct {
+	cmd       *exec.Cmd
+	fdm       *os.File
+	fde       *os.File
+	ss        *bufio.Writer
+	stickyErr error
 }
 
-func qmail_open(qq *tQmail) (r int) {
+func Open() (qq *Qmail, err error) {
+	var (
+		cmd *exec.Cmd
+		fdm *os.File
+		fde *os.File
+	)
+
 	defer func() {
-		if r == -1 {
-			qq.cmd = nil
-			if qq.fdm != nil {
-				qq.fdm.Close()
+		if err != nil {
+			cmd = nil
+			if fdm != nil {
+				fdm.Close()
 			}
-			if qq.fde != nil {
-				qq.fde.Close()
+			if fde != nil {
+				fde.Close()
 			}
 		}
 	}()
 
-	qq.cmd = exec.Command(binqqargs[0], binqqargs[1:]...)
-	qq.cmd.Dir = auto_qmail
+	cmd = exec.Command(binqqargs[0], binqqargs[1:]...)
 
 	{
 		pr, pw, err := os.Pipe()
 		if err != nil {
-			return -1
+			return nil, err
 		}
 		defer pr.Close() // TODO: close pw on children side
-		qq.cmd.Stdin = pr
-		qq.fdm = pw
+		cmd.Stdin = pr
+		fdm = pw
 	}
 
 	{
 		pr, pw, err := os.Pipe()
 		if err != nil {
-			return -1
+			return nil, err
 		}
-		defer pr.Close()   // TODO: close pw on children side
-		qq.cmd.Stdout = pr // yes, qmail-queue reads from fd=1 (stdout)
-		qq.fde = pw
+		defer pr.Close() // TODO: close pw on children side
+		cmd.Stdout = pr  // yes, qmail-queue reads from fd=1 (stdout)
+		fde = pw
 	}
 
-	qq.cmd.Stderr = os.Stderr
+	cmd.Stderr = os.Stderr
 
-	if err := qq.cmd.Start(); err != nil {
-		return -1
+	if err := cmd.Start(); err != nil {
+		return nil, err
 	}
 
-	qq.ss = bufio.NewWriter(qq.fdm)
-	return 0
+	return &Qmail{
+		cmd: cmd,
+		fdm: fdm,
+		fde: fde,
+		ss:  bufio.NewWriter(fdm),
+	}, err
 }
 
-func qmail_qp(qq *tQmail) int {
+func (qq *Qmail) Pid() int {
 	return qq.cmd.Process.Pid
 }
 
-func qmail_fail(qq *tQmail) bool {
-	return qq.flagerr
+func (qq *Qmail) Err() error {
+	return qq.stickyErr
 }
 
-func qmail_puts(qq *tQmail, s string) {
-	if !qq.flagerr {
+func (qq *Qmail) Fail() {
+	qq.stickyErr = errors.New("calling code error")
+	// XXX: В результате мы не зафлешим тело и/или конверт (последнее сигдал для qmail-queue?).
+	// А на выходе получим ошибку "Zqq read error (#4.3.0)". Но это пофиг, т.к вызывающий код сам
+	// знает что случилось. Как-то корявинько и неявненько
+}
+
+func (qq *Qmail) Puts(s string) {
+	if qq.stickyErr == nil {
 		if _, err := qq.ss.WriteString(s); err != nil {
-			qq.flagerr = true
+			qq.stickyErr = err
 		}
 	}
 }
 
-func qmail_putc(qq *tQmail, ch byte) {
-	if !qq.flagerr {
+func (qq *Qmail) Putc(ch byte) {
+	if qq.stickyErr == nil {
 		if err := qq.ss.WriteByte(ch); err != nil {
-			qq.flagerr = true
+			qq.stickyErr = err
 		}
 	}
 }
 
-func qmail_from(qq *tQmail, s string) {
+func (qq *Qmail) From(s string) {
 	if err := qq.ss.Flush(); err != nil {
-		qq.flagerr = true
+		qq.stickyErr = err
 	}
 	qq.fdm.Close()
 	qq.ss = bufio.NewWriter(qq.fde)
 
-	qmail_putc(qq, 'F')
-	qmail_puts(qq, s)
-	qmail_putc(qq, 0)
+	qq.Putc('F')
+	qq.Puts(s)
+	qq.Putc(0)
 }
 
-func qmail_to(qq *tQmail, s string) {
-	qmail_putc(qq, 'T')
-	qmail_puts(qq, s)
-	qmail_putc(qq, 0)
+func (qq *Qmail) To(s string) {
+	qq.Putc('T')
+	qq.Puts(s)
+	qq.Putc(0)
 }
 
-func qmail_close(qq *tQmail) string {
-	qmail_putc(qq, 0)
-	if !qq.flagerr {
+func (qq *Qmail) Close() string {
+	qq.Putc(0)
+	if qq.stickyErr == nil {
 		if err := qq.ss.Flush(); err != nil {
-			qq.flagerr = true
+			qq.stickyErr = err
 		}
 	}
 	qq.fde.Close()
@@ -137,7 +153,7 @@ func qmail_close(qq *tQmail) string {
 	case 53:
 		return "Zqq write error or disk full (#4.3.0)"
 	case 0:
-		if !qq.flagerr {
+		if qq.stickyErr == nil {
 			return ""
 		}
 		fallthrough

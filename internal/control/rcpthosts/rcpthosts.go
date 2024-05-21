@@ -1,23 +1,30 @@
-package main
+package rcpthosts
 
 import (
 	"os"
 	"strings"
+
+	"qmail-smtpd/internal/constmap"
+	"qmail-smtpd/internal/control"
 )
 
 var flagrh int
-var maprh = tConstmap{}
-var fdmrh *os.File
+var maprh constmap.Constmap
+var fdmrh *os.File // TODO
 
-func rcpthosts_init() int {
+func Init() int {
 	var rh []string
 
-	rh, flagrh = control_readfile("control/rcpthosts", false)
+	rh, flagrh = control.ReadFile("control/rcpthosts", false)
 	if flagrh != 1 {
 		return flagrh
 	}
 
-	constmap_init(maprh, rh)
+	for i := range rh {
+		rh[i] = strings.ToLower(rh[i])
+	}
+
+	maprh = constmap.New(rh)
 
 	// TODO:
 	// fdmrh = open_read("control/morercpthosts.cdb");
@@ -26,15 +33,15 @@ func rcpthosts_init() int {
 	return 0
 }
 
-func rcpthosts(buf string) int {
+func Allowed(buf string) bool {
 	if flagrh != 1 {
-		return 1
+		return true
 	}
 
 	j := strings.IndexByte(buf, '@')
 	if j == -1 {
 		/* presumably envnoathost is acceptable */
-		return 1
+		return true
 	}
 
 	j++
@@ -42,8 +49,8 @@ func rcpthosts(buf string) int {
 
 	for j := range buf {
 		if j == 0 || buf[j] == '.' {
-			if constmap(maprh, buf[j:]) {
-				return 1
+			if maprh.Contains(buf[j:]) {
+				return true
 			}
 		}
 	}
@@ -56,5 +63,5 @@ func rcpthosts(buf string) int {
 	// 	}
 	// }
 
-	return 0
+	return false
 }

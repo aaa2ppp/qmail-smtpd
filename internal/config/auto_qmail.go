@@ -1,12 +1,12 @@
-package main
+package config
 
 import "os"
 
-var auto_qmail = "/var/qmail"
+var AutoQmail = "/var/qmail"
 
 func init() {
 	v := os.Getenv("AUTO_QMAIL")
 	if v != "" {
-		auto_qmail = v
+		AutoQmail = v
 	}
 }

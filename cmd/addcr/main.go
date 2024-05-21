@@ -24,9 +24,10 @@ func main() {
 			}
 			log.Fatal(err)
 		}
-		_, err = bw.Write(line)
+		bw.Write(line)
 		if !isPrefix {
-			_, err = bw.WriteString("\r\n")
+			bw.WriteString("\r\n")
+			err = bw.Flush()
 		}
 		if err != nil {
 			log.Fatal(err)

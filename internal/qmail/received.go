@@ -1,4 +1,4 @@
-package main
+package qmail
 
 import "time"
 
@@ -30,20 +30,19 @@ func issafe(ch byte) bool {
 	return false
 }
 
-func safeput(qqt *tQmail, s string) {
+func (qqt *Qmail) safeput(s string) {
 	for _, ch := range []byte(s) {
 		if !issafe(ch) {
 			ch = '?'
 		}
-		qmail_putc(qqt, ch)
+		qqt.Putc(ch)
 	}
 }
 
 /* "Received: from relay1.uu.net (HELO uunet.uu.net) (7@192.48.96.5)\n" */
 /* "  by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000\n" */
 
-func received(
-	qqt *tQmail,
+func (qqt *Qmail) Received(
 	protocol string,
 	local string,
 	remoteip string,
@@ -51,25 +50,25 @@ func received(
 	remoteinfo string,
 	helo string,
 ) {
-	qmail_puts(qqt, "Received: from ")
-	safeput(qqt, remotehost)
+	qqt.Puts("Received: from ")
+	qqt.safeput(remotehost)
 	if helo != "" {
-		qmail_puts(qqt, " (HELO ")
-		safeput(qqt, helo)
-		qmail_puts(qqt, ")")
+		qqt.Puts(" (HELO ")
+		qqt.safeput(helo)
+		qqt.Puts(")")
 	}
-	qmail_puts(qqt, " (")
+	qqt.Puts(" (")
 	if remoteinfo != "" {
-		safeput(qqt, remoteinfo)
-		qmail_puts(qqt, "@")
+		qqt.safeput(remoteinfo)
+		qqt.Puts("@")
 	}
-	safeput(qqt, remoteip)
-	qmail_puts(qqt, ")\n  by ")
-	safeput(qqt, local)
-	qmail_puts(qqt, " with ")
-	qmail_puts(qqt, protocol)
-	qmail_puts(qqt, "; ")
+	qqt.safeput(remoteip)
+	qqt.Puts(")\n  by ")
+	qqt.safeput(local)
+	qqt.Puts(" with ")
+	qqt.Puts(protocol)
+	qqt.Puts("; ")
 	dt := time.Now()
-	qmail_puts(qqt, dt.Format(time.RFC822Z))
-	qmail_putc(qqt, '\n')
+	qqt.Puts(dt.Format(time.RFC822Z))
+	qqt.Putc('\n')
 }

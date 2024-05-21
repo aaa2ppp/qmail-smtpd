@@ -1,25 +1,27 @@
-package main
+package control
 
 import (
 	"bufio"
 	"io"
 	"os"
 	"strings"
+
+	"qmail-smtpd/internal/scan"
 )
 
 var me string
 var meok bool
 
-func control_init() int {
+func Init() int {
 	var r int
-	me, r = control_readline("control/me")
+	me, r = ReadLine("control/me")
 	if r == 1 {
 		meok = true
 	}
 	return r
 }
 
-func control_readline(fn string) (string, int) {
+func ReadLine(fn string) (string, int) {
 	fd, err := os.Open(fn)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -40,8 +42,8 @@ func control_readline(fn string) (string, int) {
 	return sa, 1
 }
 
-func control_rldef(fn string, flagme bool, def string) (string, int) {
-	sa, r := control_readline(fn)
+func Rldef(fn string, flagme bool, def string) (string, int) {
+	sa, r := ReadLine(fn)
 	if r != 0 {
 		return sa, r
 	}
@@ -54,22 +56,22 @@ func control_rldef(fn string, flagme bool, def string) (string, int) {
 	return "", 0
 }
 
-func control_readint(fn string) (int, int) {
-	line, r := control_readline(fn)
+func ReadInt(fn string) (int, int) {
+	line, r := ReadLine(fn)
 	switch r {
 	case 0:
 		return 0, 0
 	case -1:
 		return 0, -1
 	}
-	_, u := scan_ulong(line)
+	_, u := scan.ScanUlong(line)
 	if u == 0 {
 		return 0, 0
 	}
 	return int(u), 1
 }
 
-func control_readfile(fn string, flagme bool) ([]string, int) {
+func ReadFile(fn string, flagme bool) ([]string, int) {
 	fd, err := os.Open(fn)
 	if err != nil {
 		if !os.IsNotExist(err) {

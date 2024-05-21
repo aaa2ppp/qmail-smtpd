@@ -4,14 +4,11 @@ EXT=`uname | grep -q NT && echo .exe`
 
 .PHONY: run qmail-smtpd qmail-queue mktmpdir test1 addcr
 
-run: qmail-queue mktmpdir
-	AUTO_QMAIL=$(AUTO_QMAIL) go run .
-
 mktmpdir:
 	mkdir -p $(AUTO_QMAIL)/tmp
 
 qmail-smtpd:
-	go build -o $(BIN)/qmail-smtpd$(EXT) .
+	go build -o $(BIN)/qmail-smtpd$(EXT) ./cmd/qmail-smtpd
 
 qmail-queue:
 	go build -o $(BIN)/qmail-queue$(EXT) ./cmd/fake-qmail-queue

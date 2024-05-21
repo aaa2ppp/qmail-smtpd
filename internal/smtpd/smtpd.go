@@ -1,4 +1,4 @@
-package main
+package smtpd
 
 import (
 	"bufio"
@@ -9,7 +9,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"qmail-smtpd/internal/commands"
+	"qmail-smtpd/internal/constmap"
+	"qmail-smtpd/internal/control"
+	"qmail-smtpd/internal/control/ipme"
+	"qmail-smtpd/internal/control/rcpthosts"
+	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/scan"
 )
+
+func _exit(code int) { os.Exit(code) }
 
 const MAXHOPS = 100
 
@@ -100,7 +110,7 @@ var fakehelo string /* pointer into helohost, or 0 */
 
 func dohelo(arg string) {
 	helohost = arg
-	if case_diffs(remotehost, helohost) {
+	if !strings.EqualFold(remotehost, helohost) {
 		fakehelo = helohost
 	}
 }
@@ -108,27 +118,27 @@ func dohelo(arg string) {
 var liphostok bool
 var liphost string
 var bmfok bool
-var mapbmf = tConstmap{}
+var mapbmf constmap.Constmap
 
 func setup() {
-	if control_init() == -1 {
+	if control.Init() == -1 {
 		die_control()
 	}
 
-	if s, r := control_rldef("control/smtpgreeting", true, ""); r != 1 {
+	if s, r := control.Rldef("control/smtpgreeting", true, ""); r != 1 {
 		die_control()
 	} else {
 		greeting = s
 	}
 
-	if s, r := control_rldef("control/localiphost", true, ""); r == -1 {
+	if s, r := control.Rldef("control/localiphost", true, ""); r == -1 {
 		die_control()
 	} else if r == 1 {
 		liphost = s
 		liphostok = true
 	}
 
-	if i, r := control_readint("control/timeoutsmtpd"); r == -1 {
+	if i, r := control.ReadInt("control/timeoutsmtpd"); r == -1 {
 		die_control()
 	} else if r == 1 {
 		if i <= 0 {
@@ -137,18 +147,19 @@ func setup() {
 		timeout = time.Duration(i) * time.Second
 	}
 
-	if rcpthosts_init() == -1 {
+	// xxx
+	if r := rcpthosts.Init(); r == -1 {
 		die_control()
 	}
 
-	if ss, r := control_readfile("control/badmailfrom", false); r == -1 {
+	if ss, r := control.ReadFile("control/badmailfrom", false); r == -1 {
 		die_control()
 	} else if r == 1 {
-		constmap_init(mapbmf, ss)
+		mapbmf = constmap.New(ss)
 		bmfok = true
 	}
 
-	if i, r := control_readint("control/databytes"); r == -1 {
+	if i, r := control.ReadInt("control/databytes"); r == -1 {
 		die_control()
 	} else if r == 1 {
 		databytes = i
@@ -158,7 +169,7 @@ func setup() {
 	// if (x) { scan_ulong(x,&u); databytes = u; }
 	// if (!(databytes + 1)) --databytes;  // WTF: if databytes == -1 then databytes = -2 ?
 	if x := os.Getenv("DATABYTES"); x != "" {
-		_, u := scan_ulong(x)
+		_, u := scan.ScanUlong(x)
 		if u != 0 {
 			databytes = int(u)
 		}
@@ -243,9 +254,9 @@ func addrparse(arg string) int {
 		i := bytes.LastIndexByte(addrbuf, '@')
 		if i != -1 { /* if not, partner should go read rfc 821 */
 			if i+1 < len(addrbuf) && addrbuf[i+1] == '[' {
-				l, ip := ip_scanbracket(unsafeString(addrbuf[i+1:]))
+				l, ip := scan.ScanIPBracket(unsafeString(addrbuf[i+1:]))
 				if i+1+l == len(addrbuf) {
-					if ipme_is(ip) {
+					if ipme.Is(ip) {
 						addrbuf = append(addrbuf[:i+1], liphost...)
 					}
 				}
@@ -265,11 +276,11 @@ func bmfcheck() bool {
 	if !bmfok {
 		return false
 	}
-	if constmap(mapbmf, addr) {
+	if mapbmf.Contains(addr) {
 		return true
 	}
 	if j := strings.IndexByte(addr, '@'); j != -1 {
-		if constmap(mapbmf, addr[j+1:]) {
+		if mapbmf.Contains(addr[j+1:]) {
 			return true
 		}
 	}
@@ -277,11 +288,10 @@ func bmfcheck() bool {
 }
 
 func addrallowed() bool {
-	r := rcpthosts(addr)
-	if r == -1 {
+	if !rcpthosts.Allowed(addr) {
 		die_control()
 	}
-	return r != 0
+	return true
 }
 
 var seenmail bool
@@ -370,17 +380,17 @@ func (r *safeReader) Read(b []byte) (n int, err error) {
 
 var ssin = bufio.NewReader((*safeReader)(os.Stdin))
 
-var qqt tQmail
+var qqt *qmail.Qmail
 var bytestooverflow uint
 
 func put(ch byte) {
 	if bytestooverflow != 0 {
 		bytestooverflow--
 		if bytestooverflow == 0 {
-			qmail_fail(&qqt)
+			qqt.Fail()
 		}
 	}
-	qmail_putc(&qqt, ch)
+	qqt.Putc(ch)
 }
 
 func blast() int {
@@ -506,26 +516,27 @@ func smtp_data(_ string) {
 	if databytes != 0 {
 		bytestooverflow = uint(databytes) + 1
 	}
-	if qmail_open(&qqt) == -1 {
+	var err error
+	if qqt, err = qmail.Open(); err != nil {
 		err_qqt()
 		return
 	}
-	qp := qmail_qp(&qqt)
+	qp := qqt.Pid()
 	out("354 go ahead\r\n")
 
-	received(&qqt, "SMTP", local, remoteip, remotehost, remoteinfo, fakehelo)
+	qqt.Received("SMTP", local, remoteip, remotehost, remoteinfo, fakehelo)
 	hops := blast()
 	too_many_hops := hops >= MAXHOPS
 	if too_many_hops {
-		qmail_fail(&qqt)
+		qqt.Fail()
 	}
 
-	qmail_from(&qqt, mailfrom)
+	qqt.From(mailfrom)
 	for _, it := range rcptto {
-		qmail_to(&qqt, it)
+		qqt.To(it)
 	}
 
-	qqx := qmail_close(&qqt)
+	qqx := qqt.Close()
 	if qqx == "" {
 		acceptmessage(qp)
 		return
@@ -551,7 +562,7 @@ func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-var smtpcommands = []tCommands{
+var Commands = []commands.Command{
 	{"rcpt", smtp_rcpt, nil},
 	{"mail", smtp_mail, nil},
 	{"data", smtp_data, flush},
@@ -565,18 +576,14 @@ var smtpcommands = []tCommands{
 	{"", cmd_fun(err_unimpl), flush},
 }
 
-func main() {
-	sig_pipeignore()
-	if err := os.Chdir(auto_qmail); err != nil {
-		log.Fatal(err)
-	}
+func Run() {
 	setup()
-	if !ipme_init() {
+	if !ipme.Init() {
 		die_ipme()
 	}
 	smtp_greet("200 ")
 	out(" ESMTP\r\n")
-	if commands(ssin, smtpcommands) == 0 {
+	if commands.Loop(ssin, Commands) == 0 {
 		die_read()
 	}
 	die_nomem()
