@@ -11,10 +11,9 @@ var binqqargs = []string{"bin/qmail-queue"}
 type tQmail struct {
 	cmd     *exec.Cmd
 	flagerr bool
-	//pid     uint
-	fdm *os.File
-	fde *os.File
-	ss  *bufio.Writer
+	fdm     *os.File
+	fde     *os.File
+	ss      *bufio.Writer
 }
 
 func qmail_open(qq *tQmail) (r int) {
@@ -67,8 +66,8 @@ func qmail_qp(qq *tQmail) int {
 	return qq.cmd.Process.Pid
 }
 
-func qmail_fail(qq *tQmail) bool {
-	return qq.flagerr
+func qmail_fail(qq *tQmail) {
+	qq.flagerr = true
 }
 
 func qmail_puts(qq *tQmail, s string) {
