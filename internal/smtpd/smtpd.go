@@ -3,8 +3,8 @@ package smtpd
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -54,13 +54,13 @@ type Smtpd struct {
 
 func (sd *Smtpd) flush() {
 	if err := sd.ssout.Flush(); err != nil {
-		log.Fatal(err)
+		_exit(1)
 	}
 }
 
 func (sd *Smtpd) out(s string) {
 	if _, err := sd.ssout.WriteString(s); err != nil {
-		log.Fatal(err)
+		_exit(1)
 	}
 }
 
@@ -221,7 +221,7 @@ func (sd *Smtpd) addrparse(arg string) int {
 		}
 	}
 
-	var addr []byte
+	addr := make([]byte, 0, len(arg))
 	var flagesc bool
 	var flagquoted bool
 
@@ -515,14 +515,33 @@ func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-func (sd *Smtpd) Run(r io.Reader, w io.Writer) {
+func (sd *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
+
+	// XXX catch _exit
+	defer func() {
+		if p := recover(); p != nil {
+			if code, ok := p.(exitCode); ok {
+				if int(code) != 0 {
+					err = errors.New("exit with code " + strconv.Itoa(int(code)))
+				}
+				return
+			}
+			panic(p)
+		}
+	}()
+
+	sr := safeio.NewReader(r, defaultTimeout, sd.flush)
+	sw := safeio.NewWriter(w, defaultTimeout)
+	sd.ssin = bufio.NewReader(sr)
+	sd.ssout = bufio.NewWriter(sw)
+
 	sd.setup()
+	sr.Timeout(sd.timeout)
+	sw.Timeout(sd.timeout)
+
 	if !ipme.Init() {
 		sd.die_ipme()
 	}
-
-	sd.ssin = bufio.NewReader(safeio.NewReader(r, sd.timeout, sd.flush))
-	sd.ssout = bufio.NewWriter(safeio.NewWriter(w, sd.timeout))
 
 	sd.smtp_greet("200 ")
 	sd.out(" ESMTP\r\n")
@@ -548,4 +567,6 @@ func (sd *Smtpd) Run(r io.Reader, w io.Writer) {
 		sd.die_read()
 	}
 	sd.die_nomem()
+
+	return nil // stub
 }

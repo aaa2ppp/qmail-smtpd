@@ -17,5 +17,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var sd smtpd.Smtpd
-	sd.Run(os.Stdin, os.Stdout)
+	if err := sd.Run(os.Stdin, os.Stdout); err != nil {
+		log.Fatal(err)
+	}
 }

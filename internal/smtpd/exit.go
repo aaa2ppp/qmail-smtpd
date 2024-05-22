@@ -1,5 +1,7 @@
 package smtpd
 
-import "os"
+type exitCode int
 
-func _exit(code int) { os.Exit(code) }
+func _exit(code int) {
+	panic(exitCode(code))
+}
