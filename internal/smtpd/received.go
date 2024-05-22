@@ -1,4 +1,4 @@
-package qmail
+package smtpd
 
 import "time"
 
@@ -30,7 +30,7 @@ func issafe(ch byte) bool {
 	return false
 }
 
-func (qqt *Qmail) safeput(s string) {
+func safeput(qqt QmailQueue, s string) {
 	for _, ch := range []byte(s) {
 		if !issafe(ch) {
 			ch = '?'
@@ -42,7 +42,8 @@ func (qqt *Qmail) safeput(s string) {
 /* "Received: from relay1.uu.net (HELO uunet.uu.net) (7@192.48.96.5)\n" */
 /* "  by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000\n" */
 
-func (qqt *Qmail) Received(
+func received(
+	qqt QmailQueue,
 	protocol string,
 	local string,
 	remoteip string,
@@ -51,20 +52,20 @@ func (qqt *Qmail) Received(
 	helo string,
 ) {
 	qqt.Puts("Received: from ")
-	qqt.safeput(remotehost)
+	safeput(qqt, remotehost)
 	if helo != "" {
 		qqt.Puts(" (HELO ")
-		qqt.safeput(helo)
+		safeput(qqt, helo)
 		qqt.Puts(")")
 	}
 	qqt.Puts(" (")
 	if remoteinfo != "" {
-		qqt.safeput(remoteinfo)
+		safeput(qqt, remoteinfo)
 		qqt.Puts("@")
 	}
-	qqt.safeput(remoteip)
+	safeput(qqt, remoteip)
 	qqt.Puts(")\n  by ")
-	qqt.safeput(local)
+	safeput(qqt, local)
 	qqt.Puts(" with ")
 	qqt.Puts(protocol)
 	qqt.Puts("; ")

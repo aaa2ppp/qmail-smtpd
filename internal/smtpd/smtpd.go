@@ -20,6 +20,20 @@ import (
 	"qmail-smtpd/internal/scan"
 )
 
+type Qmail interface {
+	Open() (QmailQueue, error)
+}
+
+type QmailQueue interface {
+	Pid() int
+	Putc(byte)
+	Puts(string)
+	From(string)
+	To(string)
+	Fail()
+	Close() string
+}
+
 const (
 	maxHops        = 100
 	defaultTimeout = 1200 * time.Second // WTF: why so many?
@@ -40,15 +54,15 @@ type Smtpd struct {
 	liphostok     bool
 	liphost       string
 
+	qmail Qmail
 	ssin  *bufio.Reader
 	ssout *bufio.Writer
 
-	seenmail        bool
-	flagbarf        bool /* defined if seenmail */
-	mailfrom        string
-	rcptto          []string
-	addr            string
-	qqt             *qmail.Qmail
+	seenmail bool
+	flagbarf bool /* defined if seenmail */
+	mailfrom string
+	rcptto   []string
+	addr     string
 	bytestooverflow uint
 }
 
@@ -330,17 +344,17 @@ func (sd *Smtpd) smtp_rcpt(arg string) {
 	sd.out("250 ok\r\n")
 }
 
-func (sd *Smtpd) put(ch byte) {
+func (sd *Smtpd) put(qqt QmailQueue, ch byte) {
 	if sd.bytestooverflow != 0 {
 		sd.bytestooverflow--
 		if sd.bytestooverflow == 0 {
-			sd.qqt.Fail()
+			qqt.Fail()
 		}
 	}
-	sd.qqt.Putc(ch)
+	qqt.Putc(ch)
 }
 
-func (sd *Smtpd) blast() int {
+func (sd *Smtpd) blast(qqt QmailQueue) int {
 	hops := 0
 	state := 1
 	flaginheader := true
@@ -425,8 +439,8 @@ func (sd *Smtpd) blast() int {
 			if ch == '\n' {
 				return hops
 			}
-			sd.put('.')
-			sd.put('\r')
+			sd.put(qqt, '.')
+			sd.put(qqt, '\r')
 			if ch == '\r' {
 				state = 4
 				continue
@@ -438,12 +452,12 @@ func (sd *Smtpd) blast() int {
 				break
 			}
 			if ch != '\r' {
-				sd.put('\r')
+				sd.put(qqt, '\r')
 				state = 0
 			}
 		}
 
-		sd.put(ch)
+		sd.put(qqt, ch)
 	}
 }
 
@@ -469,27 +483,27 @@ func (sd *Smtpd) smtp_data(_ string) {
 	if sd.databytes != 0 {
 		sd.bytestooverflow = uint(sd.databytes) + 1
 	}
-	var err error
-	if sd.qqt, err = qmail.Open(); err != nil {
+	qqt, err := qmail.Open()
+	if err != nil {
 		sd.err_qqt()
 		return
 	}
-	qp := sd.qqt.Pid()
+	qp := qqt.Pid()
 	sd.out("354 go ahead\r\n")
 
-	sd.qqt.Received("SMTP", sd.local, sd.remoteip, sd.remotehost, sd.remoteinfo, sd.fakehelo)
-	hops := sd.blast()
+	received(qqt, "SMTP", sd.local, sd.remoteip, sd.remotehost, sd.remoteinfo, sd.fakehelo)
+	hops := sd.blast(qqt)
 	too_many_hops := hops >= maxHops
 	if too_many_hops {
-		sd.qqt.Fail()
+		qqt.Fail()
 	}
 
-	sd.qqt.From(sd.mailfrom)
+	qqt.From(sd.mailfrom)
 	for _, it := range sd.rcptto {
-		sd.qqt.To(it)
+		qqt.To(it)
 	}
 
-	qqx := sd.qqt.Close()
+	qqx := qqt.Close()
 	if qqx == "" {
 		sd.acceptmessage(qp)
 		return
@@ -515,7 +529,7 @@ func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-func (sd *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
+func (sd *Smtpd) Run(r io.Reader, w io.Writer, qmail Qmail) (err error) {
 
 	// XXX catch _exit
 	defer func() {
@@ -534,6 +548,7 @@ func (sd *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
 	sw := safeio.NewWriter(w, defaultTimeout)
 	sd.ssin = bufio.NewReader(sr)
 	sd.ssout = bufio.NewWriter(sw)
+	sd.qmail = qmail
 
 	sd.setup()
 	sr.Timeout(sd.timeout)
