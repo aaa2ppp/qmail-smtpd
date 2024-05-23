@@ -58,11 +58,10 @@ type Smtpd struct {
 	ssin  *bufio.Reader
 	ssout *bufio.Writer
 
-	seenmail bool
-	flagbarf bool /* defined if seenmail */
-	mailfrom string
-	rcptto   []string
-	addr     string
+	seenmail        bool
+	flagbarf        bool /* defined if seenmail */
+	mailfrom        string
+	rcptto          []string
 	bytestooverflow uint
 }
 
@@ -213,7 +212,7 @@ func (sd *Smtpd) setup() {
 	sd.dohelo(sd.remotehost)
 }
 
-func (sd *Smtpd) addrparse(arg string) int {
+func (sd *Smtpd) addrparse(arg string) (string, bool) {
 	terminator := '>'
 
 	if i := strings.IndexByte(arg, '<'); i != -1 {
@@ -274,18 +273,10 @@ func (sd *Smtpd) addrparse(arg string) int {
 	}
 
 	if len(addr) > 900 {
-		return 0
+		return "", false
 	}
 
-	sd.addr = string(addr)
-	return 1
-}
-
-func (sd *Smtpd) addrallowed() bool {
-	if !rcpthosts.Allowed(sd.addr) {
-		sd.die_control()
-	}
-	return true
+	return string(addr), true
 }
 
 func (sd *Smtpd) smtp_helo(arg string) {
@@ -308,14 +299,15 @@ func (sd *Smtpd) smtp_rset(args string) {
 }
 
 func (sd *Smtpd) smtp_mail(arg string) {
-	if r := sd.addrparse(arg); r == 0 {
+	addr, ok := sd.addrparse(arg)
+	if !ok {
 		sd.err_syntax()
 		return
 	}
-	sd.flagbarf = !badmailfrom.Allowed(sd.addr)
+	sd.flagbarf = !badmailfrom.Allowed(addr)
 	sd.seenmail = true
 	sd.rcptto = sd.rcptto[:0]
-	sd.mailfrom = sd.addr
+	sd.mailfrom = addr
 	sd.out("250 ok\r\n")
 }
 
@@ -324,7 +316,8 @@ func (sd *Smtpd) smtp_rcpt(arg string) {
 		sd.err_wantmail()
 		return
 	}
-	if r := sd.addrparse(arg); r == 0 {
+	addr, ok := sd.addrparse(arg)
+	if !ok {
 		sd.err_syntax()
 		return
 	}
@@ -333,14 +326,14 @@ func (sd *Smtpd) smtp_rcpt(arg string) {
 		return
 	}
 	if sd.relayclientok {
-		sd.addr += sd.relayclient
+		addr += sd.relayclient
 	} else {
-		if !sd.addrallowed() {
+		if !rcpthosts.Allowed(addr) {
 			sd.err_nogateway()
 			return
 		}
 	}
-	sd.rcptto = append(sd.rcptto, sd.addr)
+	sd.rcptto = append(sd.rcptto, addr)
 	sd.out("250 ok\r\n")
 }
 
