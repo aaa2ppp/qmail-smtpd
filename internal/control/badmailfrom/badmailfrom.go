@@ -7,30 +7,32 @@ import (
 	"qmail-smtpd/internal/control"
 )
 
-var bmfok bool
 var mapbmf constmap.Constmap
 
 func Init() int {
-	if ss, r := control.ReadFile("control/badmailfrom", false); r == -1 {
-		return -1
-	} else if r == 1 {
-		mapbmf = constmap.New(ss)
-		bmfok = true
+	bmf, r := control.ReadFile("control/badmailfrom", false)
+	if r != 1 {
+		return r
 	}
+	for i := range bmf {
+		bmf[i] = strings.ToLower(bmf[i])
+	}
+	mapbmf = constmap.New(bmf)
 	return 1
 }
 
-func Allowed(addr string) bool {
-	if !bmfok {
-		return true
-	}
-	if mapbmf.Contains(addr) {
+func Match(addr string) bool {
+	if mapbmf == nil {
 		return false
+	}
+	addr = strings.ToLower(addr)
+	if mapbmf.Contains(addr) {
+		return true
 	}
 	if j := strings.IndexByte(addr, '@'); j != -1 {
 		if mapbmf.Contains(addr[j+1:]) {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }

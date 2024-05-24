@@ -41,7 +41,7 @@ func ScanIPBracket(s string) (int, IPAddress) {
 	if l == 0 {
 		return 0, ip
 	}
-	if l+1 > len(s) || s[l+1] != ']' {
+	if l+1 >= len(s) || s[l+1] != ']' {
 		return 0, ip
 	}
 

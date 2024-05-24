@@ -66,7 +66,7 @@ func ReadInt(fn string) (int, int) {
 		return 0, -1
 	}
 	_, u := scan.ScanUlong(line)
-	if u == 0 {
+	if u == 0 { // WTF?
 		return 0, 0
 	}
 	return int(u), 1
@@ -92,9 +92,9 @@ func ReadFile(fn string, flagme bool) ([]string, int) {
 		if err != nil && err != io.EOF {
 			return sa, -1
 		}
-		if err == io.EOF && line == "" {
-			return sa, 1
-		}
+		// if err == io.EOF && line == "" {
+		// 	return sa, 1
+		// }
 		line = strings.TrimSpace(line)
 		if len(line) > 0 && line[0] != '#' {
 			sa = append(sa, line)
@@ -103,6 +103,4 @@ func ReadFile(fn string, flagme bool) ([]string, int) {
 			return sa, 1
 		}
 	}
-
-	//return nil, -1
 }

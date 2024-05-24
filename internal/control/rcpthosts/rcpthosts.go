@@ -8,48 +8,43 @@ import (
 	"qmail-smtpd/internal/control"
 )
 
-var flagrh int
 var maprh constmap.Constmap
 var fdmrh *os.File // TODO
 
 func Init() int {
-	var rh []string
-
-	rh, flagrh = control.ReadFile("control/rcpthosts", false)
-	if flagrh != 1 {
-		return flagrh
+	rh, r := control.ReadFile("control/rcpthosts", false)
+	if r != 1 {
+		return r
 	}
-
 	for i := range rh {
 		rh[i] = strings.ToLower(rh[i])
 	}
-
 	maprh = constmap.New(rh)
 
 	// TODO:
 	// fdmrh = open_read("control/morercpthosts.cdb");
 	// if (fdmrh == -1) if (errno != error_noent) return flagrh = -1;
 
-	return 0
+	return 1
 }
 
-func Allowed(buf string) bool {
-	if flagrh != 1 {
+func Match(addr string) bool {
+	if maprh != nil {
 		return true
 	}
 
-	j := strings.IndexByte(buf, '@')
+	j := strings.IndexByte(addr, '@')
 	if j == -1 {
 		/* presumably envnoathost is acceptable */
 		return true
 	}
 
 	j++
-	buf = strings.ToLower(buf[j:])
+	addr = strings.ToLower(addr[j:])
 
-	for j := range buf {
-		if j == 0 || buf[j] == '.' {
-			if maprh.Contains(buf[j:]) {
+	for j := range addr {
+		if j == 0 || addr[j] == '.' {
+			if maprh.Contains(addr[j:]) {
 				return true
 			}
 		}
