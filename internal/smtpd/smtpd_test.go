@@ -1,15 +1,23 @@
-package smtpd_test
+package smtpd
 
 import (
 	"errors"
 	"io"
-	"qmail-smtpd/internal/scan"
-	"qmail-smtpd/internal/smtpd"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"qmail-smtpd/internal/scan"
 )
+
+type alwaysAuth struct{}
+
+func (a alwaysAuth) Authenticate(_, _, _ string) bool { return true }
+
+type alwaysNoAuth struct{}
+
+func (a alwaysNoAuth) Auth(_, _, _ string) bool { return false }
 
 type alwaysMatch struct{}
 
@@ -60,7 +68,7 @@ type qmailQueue struct {
 	result string
 }
 
-func (qq *qmailQueue) Open() (smtpd.QmailQueue, error) {
+func (qq *qmailQueue) Open() (QmailQueue, error) {
 	return qq, nil
 }
 
@@ -73,11 +81,9 @@ func (qq *qmailQueue) Fail()         { qq.result = "D*** Fail() called ***" }
 func (qq *qmailQueue) Close() string { return qq.result }
 
 var (
-	_ smtpd.Qmail      = (*qmailQueue)(nil)
-	_ smtpd.QmailQueue = (*qmailQueue)(nil)
+	_ Qmail      = (*qmailQueue)(nil)
+	_ QmailQueue = (*qmailQueue)(nil)
 )
-
-type Smtpd = smtpd.Smtpd
 
 func TestSmtpd_Run(t *testing.T) {
 	tests := []struct {
@@ -218,6 +224,145 @@ quit
 			strings.NewReader("helo\nmail from:<>\nrcpt\nquit\n"),
 			&writer{},
 			[]int{200, 250, 250, 555, 221},
+			false,
+		},
+		{
+			"no auth",
+			&Smtpd{},
+			strings.NewReader("ehlo\nauth\nquit\n"),
+			&writer{},
+			[]int{200, 250, 503, 221},
+			false,
+		},
+		{
+			"auth login - ok",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth login dmFzeWFAcHVwa2luLm9yZwo=
+bXkgc3Ryb25nIHBhc3N3b3JkCg==
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 235, 221},
+			false,
+		},
+		{
+			"auth login - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth login vasya@pupkin.org
+quit
+`),
+			&writer{},
+			[]int{200, 250, 501, 221},
+			false,
+		},
+		{
+			"auth login2 - ok",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth login
+dmFzeWFAcHVwa2luLm9yZwo=
+bXkgc3Ryb25nIHBhc3N3b3JkCg==
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 334, 235, 221},
+			false,
+		},
+		{
+			"auth login2 - ok",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth login
+dmFzeWFAcHVwa2luLm9yZwo=
+bXkgc3Ryb25nIHBhc3N3b3JkCg==
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 334, 235, 221},
+			false,
+		},
+		{
+			"auth login2 - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth login
+vasya@pupkin.org
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 501, 221},
+			false,
+		},
+		{
+			"auth plain - ok",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
+quit
+`),
+			&writer{},
+			[]int{200, 250, 235, 221},
+			false,
+		},
+		{
+			"auth plain - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth plain 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
+quit
+`),
+			&writer{},
+			[]int{200, 250, 501, 221},
+			false,
+		},
+		{
+			"auth plain2 - ok",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth plain 
+MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 235, 221},
+			false,
+		},
+		{
+			"auth plain2 - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth plain
+12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 501, 221},
+			false,
+		},
+		{
+			"auth cram-md5 - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth cram-md5
+dmFzeWFAcHVwa2luLm9yZyBhNGZlYTY2YjJhYjA4ZjEyZGI5OTYyMTlmZTc3YTM1Yw==
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 235, 221},
+			false,
+		},
+		{
+			"auth cram-md5 - oops! need base64 encoding",
+			&Smtpd{Hostname: "localhost", Auth: alwaysAuth{}},
+			strings.NewReader(`ehlo
+auth cram-md5
+vasya@pupkin.org a4fea66b2ab08f12db996219fe77a35c
+quit
+`),
+			&writer{},
+			[]int{200, 250, 334, 501, 221},
 			false,
 		},
 		{

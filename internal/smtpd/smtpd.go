@@ -55,6 +55,8 @@ type Smtpd struct {
 	BadMailFrom   AddrMatcher
 	IPMe          IPMe
 	Qmail         Qmail
+	Hostname      string
+	Auth          Authenticator
 
 	ssin  *bufio.Reader
 	ssout *bufio.Writer
@@ -67,6 +69,7 @@ type Smtpd struct {
 	rcptto          []string
 	bytestooverflow uint
 	qqt             QmailQueue
+	authorized      bool
 }
 
 func (d *Smtpd) flush() {
@@ -137,6 +140,10 @@ func (d *Smtpd) smtp_helo(arg string) {
 
 func (d *Smtpd) smtp_ehlo(arg string) {
 	d.smtp_greet("250-")
+	if d.Auth != nil {
+		d.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
+		d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN")
+	}
 	d.out("\r\n250-PIPELINING\r\n250 8BITMIME\r\n")
 	d.seenmail = false
 	d.dohelo(arg)
@@ -300,6 +307,7 @@ func (d *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
 		{"rcpt", d.smtp_rcpt, nil},
 		{"mail", d.smtp_mail, nil},
 		{"data", d.smtp_data, d.flush},
+		{"auth", d.smtp_auth, d.flush},
 		{"quit", d.smtp_quit, d.flush},
 		{"helo", d.smtp_helo, d.flush},
 		{"ehlo", d.smtp_ehlo, d.flush},
