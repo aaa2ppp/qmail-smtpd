@@ -1,6 +1,9 @@
 package smtpd
 
-import "qmail-smtpd/internal/safeio"
+import (
+	"errors"
+	"os"
+)
 
 // TODO: развязать с Smtpd?
 
@@ -26,7 +29,7 @@ func (d *Smtpd) blast() int {
 	for {
 		ch, err := d.ssin.ReadByte()
 		if err != nil {
-			if err == safeio.ErrIOTimeout {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
 				d.die_alarm()
 			}
 			d.die_read()

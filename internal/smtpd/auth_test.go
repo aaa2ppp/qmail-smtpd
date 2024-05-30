@@ -107,7 +107,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 			w := &bytes.Buffer{}
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
-			got, got1 := tt.d.auth_gets()
+			got, got1 := tt.d.auth_getln()
 			tt.d.flush()
 			if got != tt.want {
 				t.Errorf("Smtpd.auth_gets() got = %v, want %v", got, tt.want)
@@ -369,7 +369,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		// TODO: Add test cases.
 	}
 
-	attributesIsEqual := func (a1, a2 authAttributes) bool {
+	attributesIsEqual := func(a1, a2 authAttributes) bool {
 		if a1.user != a2.user || a1.resp != a2.resp {
 			return false
 		}

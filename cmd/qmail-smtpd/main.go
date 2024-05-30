@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"os"
 	"os/signal"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"qmail-smtpd/internal/config"
+	"qmail-smtpd/internal/conn"
 	"qmail-smtpd/internal/control"
 	"qmail-smtpd/internal/control/badmailfrom"
 	"qmail-smtpd/internal/control/rcpthosts"
@@ -50,8 +52,14 @@ func main() {
 	}
 
 	d := mustSetupSmtpd()
+	c := &conn.Conn{
+		Reader:   os.Stdin,
+		Writer:   os.Stdout,
+		LocalIP:  conn.Addr(d.LocalIP),
+		RemoteIP: conn.Addr(d.RemoteIP),
+	}
 
-	if err := d.Run(os.Stdin, os.Stdout); err != nil {
+	if err := d.Run(c); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -126,17 +134,19 @@ func mustSetupSmtpd() *smtpd.Smtpd {
 		d.Databytes--
 	}
 
-	d.RemoteIP = os.Getenv("TCPREMOTEIP")
-	if d.RemoteIP == "" {
-		d.RemoteIP = "unknown"
+	d.LocalIP = os.Getenv("TCPLOCALIP")
+	if d.LocalIP == "" {
+		d.LocalIP = "unknown"
 	}
 
 	d.LocalHost = os.Getenv("TCPLOCALHOST")
 	if d.LocalHost == "" {
-		d.LocalHost = os.Getenv("TCPLOCALIP")
+		d.LocalHost = d.LocalIP
 	}
-	if d.LocalHost == "" {
-		d.LocalHost = "unknown"
+
+	d.RemoteIP = os.Getenv("TCPREMOTEIP")
+	if d.RemoteIP == "" {
+		d.RemoteIP = "unknown"
 	}
 
 	d.RemoteHost = os.Getenv("TCPREMOTEHOST")
@@ -153,6 +163,13 @@ func mustSetupSmtpd() *smtpd.Smtpd {
 	d.IPMe = ipmeAdapter{}
 
 	d.Qmail = qmailAdapter{}
+
+	cert, err := tls.LoadX509KeyPair("control/servercert.pem", "control/servercert.pem")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	d.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
 	return &d
 }

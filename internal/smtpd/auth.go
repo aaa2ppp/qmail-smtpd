@@ -26,7 +26,7 @@ func (d *Smtpd) auth_prompt(prompt string) {
 	d.flush()
 }
 
-func (d *Smtpd) auth_gets() (string, bool) {
+func (d *Smtpd) auth_getln() (string, bool) {
 	s, err := d.ssin.ReadString('\n')
 	if err != nil {
 		d.die_read() // XXX panic!
@@ -63,7 +63,7 @@ func (d *Smtpd) auth_login(arg string) (authAttributes, bool) {
 		}
 	} else {
 		d.auth_prompt("Username:")
-		if aa.user, ok = d.auth_gets(); !ok {
+		if aa.user, ok = d.auth_getln(); !ok {
 			return aa, false
 		}
 	}
@@ -73,7 +73,7 @@ func (d *Smtpd) auth_login(arg string) (authAttributes, bool) {
 	}
 
 	d.auth_prompt("Password:")
-	if aa.pass, ok = d.auth_gets(); !ok {
+	if aa.pass, ok = d.auth_getln(); !ok {
 		return aa, false
 	}
 	if aa.pass == "" {
@@ -95,7 +95,7 @@ func (d *Smtpd) auth_plain(arg string) (authAttributes, bool) {
 		}
 	} else {
 		d.auth_prompt("")
-		if slop, ok = d.auth_gets(); !ok {
+		if slop, ok = d.auth_getln(); !ok {
 			return aa, false
 		}
 	}
@@ -155,7 +155,7 @@ func (d *Smtpd) auth_cram(arg string) (authAttributes, bool) {
 
 	aa.pass = cram_request(d.Hostname)
 	d.auth_prompt(aa.pass)
-	if slop, ok = d.auth_gets(); !ok {
+	if slop, ok = d.auth_getln(); !ok {
 		return aa, false
 	}
 
@@ -208,8 +208,16 @@ func (d *Smtpd) smtp_auth(arg string) {
 	var f func(string) (authAttributes, bool)
 	switch strings.ToLower(cmd) {
 	case "login":
+		if !d.tlsEnabled {
+			d.out("504 auth type unimplemented (#5.5.1)\r\n")
+			return
+		}
 		f = d.auth_login
 	case "plain":
+		if !d.tlsEnabled {
+			d.out("504 auth type unimplemented (#5.5.1)\r\n")
+			return
+		}
 		f = d.auth_plain
 	case "cram-md5":
 		f = d.auth_cram

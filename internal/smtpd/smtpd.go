@@ -2,14 +2,15 @@ package smtpd
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
-	"io"
+	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"qmail-smtpd/internal/commands"
-	"qmail-smtpd/internal/safeio"
 	"qmail-smtpd/internal/scan"
 )
 
@@ -48,6 +49,7 @@ type Smtpd struct {
 	RemoteHost    string
 	RemoteInfo    string
 	LocalIPHost   string
+	LocalIP       string
 	LocalHost     string
 	RelayClient   string
 	RelayClientOk bool
@@ -57,7 +59,9 @@ type Smtpd struct {
 	Qmail         Qmail
 	Hostname      string
 	Auth          Authenticator
+	TLSConfig     *tls.Config
 
+	conn  net.Conn
 	ssin  *bufio.Reader
 	ssout *bufio.Writer
 
@@ -70,6 +74,7 @@ type Smtpd struct {
 	bytestooverflow uint
 	qqt             QmailQueue
 	authorized      bool
+	tlsEnabled      bool
 }
 
 func (d *Smtpd) flush() {
@@ -140,9 +145,17 @@ func (d *Smtpd) smtp_helo(arg string) {
 
 func (d *Smtpd) smtp_ehlo(arg string) {
 	d.smtp_greet("250-")
-	if d.Auth != nil {
-		d.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
-		d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN")
+	if d.Auth != nil && !d.authorized {
+		if d.tlsEnabled {
+			d.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
+			d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN") // WTF?
+		} else {
+			d.out("\r\n250-AUTH CRAM-MD5")
+			d.out("\r\n250-AUTH=CRAM-MD5") // WTF?
+		}
+	}
+	if d.TLSConfig != nil && !d.tlsEnabled {
+		d.out("\r\n250-STARTTLS")
 	}
 	d.out("\r\n250-PIPELINING\r\n250 8BITMIME\r\n")
 	d.seenmail = false
@@ -276,7 +289,15 @@ func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-func (d *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
+type cmdReader struct {
+	p **bufio.Reader
+}
+
+func (r cmdReader) ReadString(delim byte) (string, error) {
+	return (*r.p).ReadString(delim)
+}
+
+func (d *Smtpd) Run(conn net.Conn) (err error) {
 
 	// XXX catch _exit
 	defer func() {
@@ -291,16 +312,9 @@ func (d *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
 		}
 	}()
 
-	timeout := d.Timeout
-	if timeout == 0 {
-		timeout = DefaultTimeout
-	}
-
-	d.ssin = bufio.NewReader(safeio.NewReader(r, timeout, d.flush))
-	d.ssout = bufio.NewWriter(safeio.NewWriter(w, timeout))
-
+	d.safeio_init(conn)
 	d.dohelo(d.RemoteHost)
-	d.smtp_greet("200 ")
+	d.smtp_greet("220 ")
 	d.out(" ESMTP\r\n")
 
 	cmds := []commands.Command{
@@ -313,13 +327,14 @@ func (d *Smtpd) Run(r io.Reader, w io.Writer) (err error) {
 		{"ehlo", d.smtp_ehlo, d.flush},
 		{"rset", d.smtp_rset, nil},
 		{"help", d.smtp_help, d.flush},
+		{"starttls", d.smtp_tls, nil},
 		{"noop", cmd_fun(d.err_noop), d.flush}, // WTF? почему err_noop, а не smtp_noop?
 		{"vrfy", cmd_fun(d.err_vrfy), d.flush}, // WTF? аналогично?
 		{"", cmd_fun(d.err_unimpl), d.flush},
 	}
 
-	if err := commands.Loop(d.ssin, cmds); err != nil {
-		if err == safeio.ErrIOTimeout {
+	if err := commands.Loop(cmdReader{&d.ssin}, cmds); err != nil { // XXX
+		if errors.Is(err, os.ErrDeadlineExceeded) {
 			d.die_alarm()
 		}
 		d.die_read()

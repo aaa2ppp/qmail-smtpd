@@ -10,11 +10,11 @@ type Command struct {
 	Flush func()
 }
 
-type reader interface {
+type StringReader interface {
 	ReadString(byte) (string, error)
 }
 
-func Loop(r reader, c []Command) error {
+func Loop(r StringReader, c []Command) error {
 	if len(c) == 0 || c[len(c)-1].Name != "" {
 		panic("name of last command must be empty")
 	}
