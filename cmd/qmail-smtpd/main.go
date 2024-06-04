@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"qmail-smtpd/internal/auth"
 	"qmail-smtpd/internal/config"
 	"qmail-smtpd/internal/conn"
 	"qmail-smtpd/internal/control"
@@ -43,6 +44,18 @@ func (a ipmeAdapter) Is(ip scan.IPAddress) bool {
 	return ipme.Is(ip)
 }
 
+type authAdapter struct {
+	childargs []string
+}
+
+func (a authAdapter) Authenticate(user, pass, resp string) bool {
+	ok, err := auth.Authenticate(a.childargs, user, pass, resp)
+	if err != nil {
+		log.Printf("can't authenticate %s: %v", user, err)
+	}
+	return ok
+}
+
 func main() {
 	// void sig_pipeignore() { sig_catch(SIGPIPE,SIG_IGN); }
 	signal.Ignore(syscall.SIGPIPE)
@@ -52,6 +65,11 @@ func main() {
 	}
 
 	d := mustSetupSmtpd()
+	if len(os.Args) > 1 {
+		d.Hostname = os.Args[1]
+		d.Auth = authAdapter{childargs: os.Args[2:]}
+	}
+
 	c := &conn.Conn{
 		Reader:   os.Stdin,
 		Writer:   os.Stdout,
