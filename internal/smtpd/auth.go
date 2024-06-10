@@ -27,15 +27,7 @@ func (d *Smtpd) auth_prompt(prompt string) {
 }
 
 func (d *Smtpd) auth_getln() (string, bool) {
-	s, err := d.ssin.ReadString('\n')
-	if err != nil {
-		d.die_read() // XXX panic!
-		return "", false
-	}
-	s = s[:len(s)-1] // cut \n
-	if len(s) > 0 && s[len(s)-1] == '\r' {
-		s = s[:len(s)-1]
-	}
+	s := d.getln()
 	if s == "*" {
 		d.out("501 auth exchange cancelled (#5.0.0)\r\n")
 		return "", false

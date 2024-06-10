@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"qmail-smtpd/internal/commands"
 	"qmail-smtpd/internal/scan"
 )
 
@@ -24,6 +24,12 @@ type IPMe interface {
 
 type Qmail interface {
 	Open() (QmailQueue, error)
+}
+
+type LogWriter interface { // XXX
+	io.StringWriter
+	Flush() error
+	WithPrefix(string) LogWriter
 }
 
 type QmailQueue interface {
@@ -60,10 +66,14 @@ type Smtpd struct {
 	Hostname      string
 	Auth          Authenticator
 	TLSConfig     *tls.Config
+	Log           LogWriter
 
 	conn  net.Conn
 	ssin  *bufio.Reader
 	ssout *bufio.Writer
+
+	login  LogWriter
+	logout LogWriter
 
 	helohost        string
 	fakehelo        string /* pointer into helohost, or 0 */
@@ -78,12 +88,18 @@ type Smtpd struct {
 }
 
 func (d *Smtpd) flush() {
+	if d.logout != nil {
+		d.logout.Flush()
+	}
 	if err := d.ssout.Flush(); err != nil {
 		_exit(1)
 	}
 }
 
 func (d *Smtpd) out(s string) {
+	if d.logout != nil {
+		d.logout.WriteString(s)
+	}
 	if _, err := d.ssout.WriteString(s); err != nil {
 		_exit(1)
 	}
@@ -97,6 +113,26 @@ func (d *Smtpd) straynewline() {
 	d.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
 	d.flush()
 	_exit(1)
+}
+
+func (d *Smtpd) getln() string {
+	s, err := d.ssin.ReadString('\n')
+	if err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			d.die_alarm()
+		}
+		d.die_read()
+		return ""
+	}
+	if d.login != nil {
+		d.login.WriteString(s)
+		d.login.Flush()
+	}
+	s = s[:len(s)-1]
+	if s[len(s)-1] == '\r' {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func (d *Smtpd) err_bmf() {
@@ -250,6 +286,7 @@ func (d *Smtpd) smtp_data(_ string) {
 		d.bytestooverflow = uint(d.Databytes) + 1
 	}
 	hops := d.blast()
+	// TODO: log received data bytes
 
 	too_many_hops := hops >= MaxHops
 	if too_many_hops {
@@ -289,15 +326,13 @@ func cmd_fun(fn func()) func(string) {
 	return func(_ string) { fn() }
 }
 
-type cmdReader struct {
-	p **bufio.Reader
-}
-
-func (r cmdReader) ReadString(delim byte) (string, error) {
-	return (*r.p).ReadString(delim)
-}
-
 func (d *Smtpd) Run(conn net.Conn) (err error) {
+	if d.Log != nil {
+		d.login = d.Log.WithPrefix("=> ")
+		d.logout = d.Log.WithPrefix("<= ")
+	}
+
+	d.safeio_init(conn)
 
 	// XXX catch _exit
 	defer func() {
@@ -312,12 +347,11 @@ func (d *Smtpd) Run(conn net.Conn) (err error) {
 		}
 	}()
 
-	d.safeio_init(conn)
 	d.dohelo(d.RemoteHost)
 	d.smtp_greet("220 ")
 	d.out(" ESMTP\r\n")
 
-	cmds := []commands.Command{
+	d.commands([]command{
 		{"rcpt", d.smtp_rcpt, nil},
 		{"mail", d.smtp_mail, nil},
 		{"data", d.smtp_data, d.flush},
@@ -331,15 +365,7 @@ func (d *Smtpd) Run(conn net.Conn) (err error) {
 		{"noop", cmd_fun(d.err_noop), d.flush}, // WTF? почему err_noop, а не smtp_noop?
 		{"vrfy", cmd_fun(d.err_vrfy), d.flush}, // WTF? аналогично?
 		{"", cmd_fun(d.err_unimpl), d.flush},
-	}
-
-	if err := commands.Loop(cmdReader{&d.ssin}, cmds); err != nil { // XXX
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			d.die_alarm()
-		}
-		d.die_read()
-	}
-	d.die_nomem()
+	})
 
 	return nil // stub
 }

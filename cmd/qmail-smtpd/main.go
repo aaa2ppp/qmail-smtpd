@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"qmail-smtpd/internal/control/badmailfrom"
 	"qmail-smtpd/internal/control/rcpthosts"
 	"qmail-smtpd/internal/ipme"
+	log1 "qmail-smtpd/internal/log"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/scan"
 	"qmail-smtpd/internal/smtpd"
@@ -46,6 +48,17 @@ func (a ipmeAdapter) Is(ip scan.IPAddress) bool {
 
 type authAdapter struct {
 	childargs []string
+}
+
+type logAdapter struct {
+	log1.Writer
+}
+
+func (a *logAdapter) WithPrefix(prefix string) smtpd.LogWriter {
+	return &logAdapter{log1.Writer{
+		Out:    a.Out,
+		Prefix: a.Prefix + prefix,
+	}}
 }
 
 func (a authAdapter) Authenticate(user, pass, resp string) bool {
@@ -188,6 +201,24 @@ func mustSetupSmtpd() *smtpd.Smtpd {
 	}
 
 	d.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	var logEnable bool
+	if i, r := control.ReadInt("control/smtplog"); r == -1 {
+		die_control()
+	} else {
+		logEnable = i != 0
+	}
+	if x := os.Getenv("SMTPLOG"); x != "" {
+		_, u := scan.ScanUlong(x)
+		logEnable = u != 0
+	}
+	if logEnable {
+		pid := os.Getpid()
+		d.Log = &logAdapter{log1.Writer{
+			Out:    os.Stderr,
+			Prefix: fmt.Sprintf("smtp-log[%d]: %s: ", pid, d.RemoteIP),
+		}}
+	}
 
 	return &d
 }

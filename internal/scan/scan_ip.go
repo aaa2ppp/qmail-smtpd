@@ -1,6 +1,6 @@
 package scan
 
-// TODO: не наместе определение этой структуры
+// TODO: не на месте определение этой структуры
 type IPAddress struct {
 	d [4]byte
 }

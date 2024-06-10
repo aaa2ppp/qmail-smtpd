@@ -47,6 +47,9 @@ func (sr *safeWriter) Write(b []byte) (int, error) {
 
 func (d *Smtpd) safeio_init(conn net.Conn) {
 	timeout := d.Timeout
+	if timeout < 0 {
+		panic("Smtpd.safeio_init: timeout cannot be negative")
+	}
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}

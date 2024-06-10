@@ -104,3 +104,11 @@ func ReadFile(fn string, flagme bool) ([]string, int) {
 		}
 	}
 }
+
+func Me() string {
+	return me
+}
+
+func MeOk() bool {
+	return meok
+}

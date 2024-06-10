@@ -12,6 +12,7 @@ import (
 
 	"qmail-smtpd/internal/config"
 	"qmail-smtpd/internal/conn"
+	log1 "qmail-smtpd/internal/log"
 	"qmail-smtpd/internal/smtpd"
 )
 
@@ -120,6 +121,17 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+type logAdapter struct {
+	log1.Writer
+}
+
+func (a *logAdapter) WithPrefix(prefix string) smtpd.LogWriter {
+	return &logAdapter{log1.Writer{
+		Out:    a.Out,
+		Prefix: a.Prefix + prefix,
+	}}
+}
+
 func main() {
 	if err := os.Chdir(config.AutoQmail); err != nil {
 		log.Fatalf("Chdir: %v", err)
@@ -156,6 +168,12 @@ func main() {
 		Hostname:   "localhost",
 		TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}},
 	}
+	if _, ok := os.LookupEnv("SMTPLOG"); ok {
+		serv.Log = &logAdapter{log1.Writer{
+			Out: os.Stderr,
+		}}
+	}
+
 	done := make(chan struct{})
 	go func() {
 		serv.Run(servConn)
