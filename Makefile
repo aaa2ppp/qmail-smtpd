@@ -25,3 +25,6 @@ test1: build
 
 smtpd-cover:
 	go test -coverprofile=$(TMP)/smtpd-cover.out ./internal/smtpd -run . && go tool cover -html $(TMP)/smtpd-cover.out
+
+test-tls:
+	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls
