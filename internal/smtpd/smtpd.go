@@ -190,6 +190,10 @@ func (d *Smtpd) smtp_ehlo(arg string) {
 			d.out("\r\n250-AUTH=CRAM-MD5") // WTF?
 		}
 	}
+	if d.Databytes > 0 {
+		d.out("\r\nSIZE ")
+		d.out(strconv.Itoa(d.Databytes))
+	}
 	if d.TLSConfig != nil && !d.tlsEnabled {
 		d.out("\r\n250-STARTTLS")
 	}
@@ -212,6 +216,7 @@ func (d *Smtpd) smtp_mail(arg string) {
 	if d.LocalIPHost != "" {
 		addr = replaceLocalIP(addr, d.LocalIPHost, d.IPMe)
 	}
+	// TODO: check SIZE parameter
 	d.flagbarf = d.BadMailFrom != nil && d.BadMailFrom.Match(addr)
 	d.seenmail = true
 	d.rcptto = d.rcptto[:0]
