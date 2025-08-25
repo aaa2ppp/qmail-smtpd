@@ -61,6 +61,7 @@ type Smtpd struct {
 	RelayClientOk bool
 	RcptHosts     AddrMatcher
 	BadMailFrom   AddrMatcher
+	MbxHosts      AddrMatcher
 	IPMe          IPMe
 	Qmail         Qmail
 	Hostname      string
@@ -246,6 +247,11 @@ func (d *Smtpd) smtp_rcpt(arg string) {
 	} else {
 		if d.RcptHosts != nil && !d.RcptHosts.Match(addr) {
 			d.err_nogateway()
+			return
+		}
+		// Дополнительная проверка: если домен в mbxhosts, проверить существование ящика
+		if d.MbxHosts != nil && !d.MbxHosts.Match(addr) {
+			d.out("553 mailbox does not exist (#5.1.1)\r\n")
 			return
 		}
 	}

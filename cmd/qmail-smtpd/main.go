@@ -14,6 +14,7 @@ import (
 	"qmail-smtpd/internal/conn"
 	"qmail-smtpd/internal/control"
 	"qmail-smtpd/internal/control/badmailfrom"
+	"qmail-smtpd/internal/control/mbxhosts"
 	"qmail-smtpd/internal/control/rcpthosts"
 	"qmail-smtpd/internal/ipme"
 	log1 "qmail-smtpd/internal/log"
@@ -38,6 +39,12 @@ type badmailfromAdapter struct{}
 
 func (a badmailfromAdapter) Match(addr string) bool {
 	return badmailfrom.Match(addr)
+}
+
+type mbxhostsAdapter struct{}
+
+func (a mbxhostsAdapter) Match(addr string) bool {
+	return mbxhosts.Match(addr)
 }
 
 type ipmeAdapter struct{}
@@ -144,6 +151,12 @@ func mustSetupSmtpd() *smtpd.Smtpd {
 		die_control()
 	} else if r == 1 {
 		d.BadMailFrom = badmailfromAdapter{}
+	}
+
+	if r := mbxhosts.Init(); r == -1 {
+		die_control()
+	} else if r == 1 {
+		d.MbxHosts = mbxhostsAdapter{}
 	}
 
 	if i, r := control.ReadInt("control/databytes"); r == -1 {
