@@ -6,15 +6,26 @@ import (
 )
 
 func b64decode(s string) (string, bool) {
-	b, err := base64.StdEncoding.DecodeString(s)
+	enc := base64.StdEncoding
+
+	src := unsafe.Slice(unsafe.StringData(s), len(s))
+	dst := make([]byte, enc.DecodedLen(len(s)))
+
+	n, err := enc.Decode(dst, src)
 	if err != nil {
 		return "", false
 	}
-	return unsafe.String(unsafe.SliceData(b), len(b)), true
+
+	return unsafe.String(unsafe.SliceData(dst), n), true
 }
 
 func b64encode(s string) string {
-	return base64.StdEncoding.EncodeToString(
-		unsafe.Slice(unsafe.StringData(s), len(s)),
-	)
+	enc := base64.StdEncoding
+
+	src := unsafe.Slice(unsafe.StringData(s), len(s))
+	dst := make([]byte, enc.EncodedLen(len(s)))
+
+	enc.Encode(dst, src)
+
+	return unsafe.String(unsafe.SliceData(dst), len(dst))
 }
