@@ -1,6 +1,8 @@
-.md5
-.check
-.fetch
-.unpack
-*.gz
+md5.sh
+.check-*
+.fetch-*
+.unpack-*
+*.tar.gz
 qmail-1.03/
+netqmail-1.06/
+tmp/
