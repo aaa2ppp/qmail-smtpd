@@ -3,29 +3,27 @@ package smtpd
 import (
 	"cmp"
 	"errors"
-	"os"
 )
 
 // TODO: развязать с Smtpd?
-
-func (d *Smtpd) put(ch byte) {
-	if d.bytestooverflow != 0 {
-		d.bytestooverflow--
-		if d.bytestooverflow == 0 {
-			d.qqt.Fail()
+func (d *Smtpd) put(ss *Session, ch byte) {
+	if ss.bytestooverflow != 0 {
+		ss.bytestooverflow--
+		if ss.bytestooverflow == 0 {
+			ss.qqt.Fail()
 		}
 	}
-	d.qqt.Putc(ch)
+	ss.qqt.Putc(ch)
 }
 
 var ErrStrayNewLine = errors.New("stray new line")
 
-func (d *Smtpd) straynewline() error {
-	d.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
-	return cmp.Or(d.flush(), ErrStrayNewLine)
+func (d *Smtpd) straynewline(ss *Session) error {
+	ss.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
+	return cmp.Or(ss.flush(), ErrStrayNewLine)
 }
 
-func (d *Smtpd) blast() (int, error) {
+func (d *Smtpd) blast(ss *Session) (int, error) {
 	hops := 0
 	state := 1
 	flaginheader := true
@@ -35,11 +33,8 @@ func (d *Smtpd) blast() (int, error) {
 	flagmaybez := true /* 1 if this line might match DELIVERED, if fih */
 
 	for {
-		ch, err := d.ssin.ReadByte()
+		ch, err := ss.ssin.ReadByte()
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				d.err_timeout()
-			}
 			return hops, err
 		}
 
@@ -78,7 +73,7 @@ func (d *Smtpd) blast() (int, error) {
 		switch state {
 		case 0:
 			if ch == '\n' {
-				return hops, d.straynewline()
+				return hops, d.straynewline(ss)
 			}
 			if ch == '\r' {
 				state = 4
@@ -86,7 +81,7 @@ func (d *Smtpd) blast() (int, error) {
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				return hops, d.straynewline()
+				return hops, d.straynewline(ss)
 			}
 			if ch == '.' {
 				state = 2
@@ -99,7 +94,7 @@ func (d *Smtpd) blast() (int, error) {
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				return hops, d.straynewline()
+				return hops, d.straynewline(ss)
 			}
 			if ch == '\r' {
 				state = 3
@@ -110,8 +105,8 @@ func (d *Smtpd) blast() (int, error) {
 			if ch == '\n' {
 				return hops, nil
 			}
-			d.put('.')
-			d.put('\r')
+			d.put(ss, '.')
+			d.put(ss, '\r')
 			if ch == '\r' {
 				state = 4
 				continue
@@ -123,11 +118,11 @@ func (d *Smtpd) blast() (int, error) {
 				break
 			}
 			if ch != '\r' {
-				d.put('\r')
+				d.put(ss, '\r')
 				state = 0
 			}
 		}
 
-		d.put(ch)
+		d.put(ss, ch)
 	}
 }

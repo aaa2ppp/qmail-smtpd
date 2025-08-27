@@ -95,7 +95,8 @@ var (
 func TestSmtpd_Run(t *testing.T) {
 	tests := []struct {
 		name    string
-		d       *Smtpd
+		d       *Config
+		ss      *Session
 		r       conn.Reader
 		w       *fakeWriter
 		want    []int
@@ -103,7 +104,8 @@ func TestSmtpd_Run(t *testing.T) {
 	}{
 		{
 			"all commands",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader(`nonexistent
 starttls
 help
@@ -124,7 +126,8 @@ quit
 		},
 		{
 			"rcpthost",
-			New(&Config{RcptHosts: alwaysMatch{}}),
+			&Config{RcptHosts: alwaysMatch{}},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -132,7 +135,8 @@ quit
 		},
 		{
 			"!rcpthost",
-			New(&Config{RcptHosts: alwaysNotMatch{}}),
+			&Config{RcptHosts: alwaysNotMatch{}},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -140,7 +144,8 @@ quit
 		},
 		{
 			"relayclient",
-			New(&Config{RcptHosts: alwaysNotMatch{}, RelayClientOk: true}),
+			&Config{RcptHosts: alwaysNotMatch{}, RelayClientOk: true},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -148,7 +153,8 @@ quit
 		},
 		{
 			"badmailfrom",
-			New(&Config{BadMailFrom: alwaysMatch{}}),
+			&Config{BadMailFrom: alwaysMatch{}},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -156,7 +162,8 @@ quit
 		},
 		{
 			"!badmailfrom",
-			New(&Config{BadMailFrom: alwaysNotMatch{}}),
+			&Config{BadMailFrom: alwaysNotMatch{}},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -164,7 +171,8 @@ quit
 		},
 		{
 			"badmailfrom & rcpthost",
-			New(&Config{BadMailFrom: alwaysMatch{}, RcptHosts: alwaysMatch{}}),
+			&Config{BadMailFrom: alwaysMatch{}, RcptHosts: alwaysMatch{}},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -172,15 +180,17 @@ quit
 		},
 		{
 			"read timeout",
-			New(&Config{Timeout: 1 * time.Millisecond}),
-			newFakeReaderTimeout("quit\n", 10*time.Millisecond),
+			&Config{Timeout: 10 * time.Millisecond},
+			&Session{},
+			newFakeReaderTimeout("quit\n", 100*time.Millisecond),
 			&fakeWriter{},
 			[]int{220, 451},
 			true,
 		},
 		{
 			"read error",
-			New(&Config{Timeout: 1}),
+			&Config{Timeout: 10 * time.Millisecond},
+			&Session{},
 			newReaderAlwaysErr(),
 			&fakeWriter{},
 			[]int{220},
@@ -188,15 +198,17 @@ quit
 		},
 		{
 			"write timeout",
-			New(&Config{Timeout: 1 * time.Millisecond}),
+			&Config{Timeout: 10 * time.Millisecond},
+			&Session{},
 			newFakeReader("quit\n"),
-			&fakeWriter{timeout: 10 * time.Millisecond},
+			&fakeWriter{timeout: 100 * time.Millisecond},
 			[]int{},
 			true,
 		},
 		{
 			"mail from:<> first",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("helo\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -204,7 +216,8 @@ quit
 		},
 		{
 			"mail from:<> first 2",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("helo\ndata\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -212,7 +225,8 @@ quit
 		},
 		{
 			"rcpt to:<> first",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\ndata\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 503, 221},
@@ -220,7 +234,8 @@ quit
 		},
 		{
 			"mail syntax error",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("helo\nmail\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 555, 221},
@@ -228,7 +243,8 @@ quit
 		},
 		{
 			"rcpt syntax error",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("helo\nmail from:<>\nrcpt\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 555, 221},
@@ -236,7 +252,8 @@ quit
 		},
 		{
 			"no auth",
-			New(&Config{}),
+			&Config{},
+			&Session{},
 			newFakeReader("ehlo\nauth\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -244,7 +261,8 @@ quit
 		},
 		{
 			"auth login - oops! need starttls",
-			New(&Config{Hostname: "localhost", Auth: alwaysAuth{}}),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
 quit
@@ -255,11 +273,8 @@ quit
 		},
 		{
 			"auth login - ok",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
 bXkgc3Ryb25nIHBhc3N3b3JkCg==
@@ -271,11 +286,8 @@ quit
 		},
 		{
 			"auth login - oops! need base64 encoding",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login vasya@pupkin.org
 quit
@@ -286,11 +298,8 @@ quit
 		},
 		{
 			"auth login2 - ok",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 dmFzeWFAcHVwa2luLm9yZwo=
@@ -303,11 +312,8 @@ quit
 		},
 		{
 			"auth login2 - ok",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 dmFzeWFAcHVwa2luLm9yZwo=
@@ -320,11 +326,8 @@ quit
 		},
 		{
 			"auth login2 - oops! need base64 encoding",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 vasya@pupkin.org
@@ -336,7 +339,8 @@ quit
 		},
 		{
 			"auth plain - oops! need starttls",
-			New(&Config{Hostname: "localhost", Auth: alwaysAuth{}}),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
 quit
@@ -347,11 +351,8 @@ quit
 		},
 		{
 			"auth plain - ok",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
 quit
@@ -362,11 +363,8 @@ quit
 		},
 		{
 			"auth plain - oops! need base64 encoding",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
 quit
@@ -377,11 +375,8 @@ quit
 		},
 		{
 			"auth plain2 - ok",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 
 MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
@@ -393,11 +388,8 @@ quit
 		},
 		{
 			"auth plain2 - oops! need base64 encoding",
-			func() *Smtpd {
-				d := New(&Config{Hostname: "localhost", Auth: alwaysAuth{}})
-				d.tlsEnabled = true
-				return d
-			}(),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain
 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
@@ -409,7 +401,8 @@ quit
 		},
 		{
 			"auth cram-md5 - oops! need base64 encoding",
-			New(&Config{Hostname: "localhost", Auth: alwaysAuth{}}),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{},
 			newFakeReader(`ehlo
 auth cram-md5
 dmFzeWFAcHVwa2luLm9yZyBhNGZlYTY2YjJhYjA4ZjEyZGI5OTYyMTlmZTc3YTM1Yw==
@@ -421,7 +414,8 @@ quit
 		},
 		{
 			"auth cram-md5 - oops! need base64 encoding",
-			New(&Config{Hostname: "localhost", Auth: alwaysAuth{}}),
+			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Session{},
 			newFakeReader(`ehlo
 auth cram-md5
 vasya@pupkin.org a4fea66b2ab08f12db996219fe77a35c
@@ -433,13 +427,13 @@ quit
 		},
 		{
 			"data - ok",
-			New(&Config{
+			&Config{
 				LocalHost:  "mx.pupkin.org",
 				RemoteIP:   "192.168.69.69",
 				RemoteHost: "vasya.pupkin.org",
 				Qmail:      &qmailQueue{},
-			}),
-
+			},
+			&Session{},
 			newFakeReader(addCr(`helo localhost
 mail from:<vasya@pupkin.org>
 rcpt to:<masha@pupkin.org>
@@ -456,12 +450,13 @@ quit
 		},
 		{
 			"data - no CR",
-			New(&Config{
+			&Config{
 				LocalHost:  "mx.pupkin.org",
 				RemoteIP:   "192.168.69.69",
 				RemoteHost: "vasya.pupkin.org",
 				Qmail:      &qmailQueue{},
-			}),
+			},
+			&Session{},
 			newFakeReader(delCr(`helo localhost
 mail from:<vasya@pupkin.org>
 rcpt to:<masha@pupkin.org>
@@ -482,7 +477,10 @@ quit
 		t.Run(tt.name, func(t *testing.T) {
 			var showed bool
 			conn := &conn.Conn{Reader: tt.r, Writer: tt.w}
-			if err := tt.d.Run(conn); (err != nil) != tt.wantErr {
+			d := &Smtpd{tt.d}
+			d.initSession(tt.ss, conn)
+
+			if err := d.run(tt.ss); (err != nil) != tt.wantErr {
 				if !showed {
 					t.Logf("\nSmtpd.Run() = %s", tt.w.buf.String())
 					showed = true

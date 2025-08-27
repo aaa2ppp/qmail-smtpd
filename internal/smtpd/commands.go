@@ -12,9 +12,9 @@ func parseCmdLine(line string) (name, arg string) {
 	return strings.ToLower(line[:p]), strings.TrimSpace(line[p:])
 }
 
-func (d *Smtpd) commands(c map[string]command) error {
+func (d *Smtpd) commands(ss *Session, c map[string]command) error {
 	for {
-		line, err := d.getln()
+		line, err := ss.getln()
 		if err != nil {
 			return err
 		}
@@ -25,7 +25,7 @@ func (d *Smtpd) commands(c map[string]command) error {
 			cmd = c[unimpl]
 		}
 
-		if err := cmd.handler(arg); err != nil {
+		if err := cmd.handler(ss, arg); err != nil {
 			return err
 		}
 
@@ -33,7 +33,7 @@ func (d *Smtpd) commands(c map[string]command) error {
 			continue
 		}
 
-		if err := d.flush(); err != nil {
+		if err := ss.flush(); err != nil {
 			return err
 		}
 	}

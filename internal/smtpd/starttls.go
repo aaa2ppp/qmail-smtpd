@@ -4,37 +4,37 @@ import (
 	"crypto/tls"
 )
 
-func (d *Smtpd) smtp_tls(arg string) error {
+func (d *Smtpd) smtp_tls(ss *Session,arg string) error {
 	if d.cfg.TLSConfig == nil {
-		return d.err_unimpl("") // или 454 TLS not available
+		return d.err_unimpl(ss, "") // или 454 TLS not available
 	}
 
-	if d.tlsEnabled {
-		return d.out("503 Duplicate STARTTLS (#5.5.1)\r\n")
+	if ss.tlsEnabled {
+		return ss.out("503 Duplicate STARTTLS (#5.5.1)\r\n")
 	}
 
-	if d.seenmail {
-		return d.out("503 STARTTLS invalid during mail transaction (#5.5.1)\r\n")
+	if ss.seenmail {
+		return ss.out("503 STARTTLS invalid during mail transaction (#5.5.1)\r\n")
 	}
 
 	if arg != "" {
-		return d.out("501 Syntax error (no parameters allowed) (#5.5.4)\r\n")
+		return ss.out("501 Syntax error (no parameters allowed) (#5.5.4)\r\n")
 	}
 
-	_ = d.out("220 Ready to start TLS\r\n")
-	if err := d.flush(); err != nil {
+	_ = ss.out("220 Ready to start TLS\r\n")
+	if err := ss.flush(); err != nil {
 		return err
 	}
 
-	conn := tls.Server(d.conn, d.cfg.TLSConfig)
-	d.initIO(conn)
+	conn := tls.Server(ss.conn, d.cfg.TLSConfig)
+	d.initIO(ss, conn)
 
-	d.tlsEnabled = true
-	d.seenmail = false
-	d.resetAuthorized()
+	ss.tlsEnabled = true
+	ss.seenmail = false
+	d.resetAuthorized(ss)
 
 	/* have to discard the pre-STARTTLS HELO/EHLO argument, if any */
-	d.dohelo(d.cfg.RemoteHost)
+	d.dohelo(ss, d.cfg.RemoteHost)
 
 	return nil
 }

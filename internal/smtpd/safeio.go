@@ -2,6 +2,7 @@ package smtpd
 
 import (
 	"bufio"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -49,20 +50,21 @@ func (w *safeWriter) Write(b []byte) (int, error) {
 	return w.conn.Write(b)
 }
 
-func (d *Smtpd) initIO(conn net.Conn) {
+func (d *Smtpd) initIO(ss *Session, conn net.Conn) {
 	timeout := d.cfg.Timeout
+	log.Printf("timeout: %v", timeout)
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
 	conn.SetDeadline(time.Time{})
-	d.ssin = bufio.NewReader(&safeReader{
+	ss.ssin = bufio.NewReader(&safeReader{
 		conn:    conn,
 		timeout: timeout,
-		flush:   d.flush,
+		flush:   ss.flush,
 	})
-	d.ssout = bufio.NewWriter(&safeWriter{
+	ss.ssout = bufio.NewWriter(&safeWriter{
 		conn:    conn,
 		timeout: timeout,
 	})
-	d.conn = conn
+	ss.conn = conn
 }
