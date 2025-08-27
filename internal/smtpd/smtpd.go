@@ -24,7 +24,7 @@ type IPMe interface {
 }
 
 type Qmail interface {
-	Open() (QmailQueue, error)
+	Open(env []string) (QmailQueue, error)
 }
 
 type LogWriter interface { // XXX
@@ -50,13 +50,12 @@ const (
 
 var ErrClientQuit = errors.New("client quit")
 
-type Smtpd struct {
+type Config struct {
 	Greeting      string
 	Databytes     int
 	Timeout       time.Duration
 	RemoteIP      string
 	RemoteHost    string
-	RemoteInfo    string
 	LocalIPHost   string
 	LocalIP       string
 	LocalHost     string
@@ -71,6 +70,18 @@ type Smtpd struct {
 	Auth          Authenticator
 	TLSConfig     *tls.Config
 	Log           LogWriter
+}
+
+type Smtpd struct {
+	cfg *Config
+
+	// remoteInfo contains the authenticated username in the same way as in qmail-smtpd with auth patch.
+	// It set only after successful AUTH and is never set externally. Before calling `qmail-queue`,
+	// the TCPREMOTEINFO environment variable will be set from it.
+	remoteInfo string
+
+	relayClient   string
+	relayClientOk bool
 
 	conn  net.Conn
 	ssin  *bufio.Reader
@@ -89,6 +100,14 @@ type Smtpd struct {
 	qqt             QmailQueue
 	authorized      bool
 	tlsEnabled      bool
+}
+
+func New(cfg *Config) *Smtpd {
+	return &Smtpd{
+		cfg:           cfg,
+		relayClient:   cfg.RelayClient,
+		relayClientOk: cfg.RelayClientOk,
+	}
 }
 
 func (d *Smtpd) flush() error {
@@ -143,7 +162,7 @@ func (d *Smtpd) err_timeout() error        { return d.out("451 timeout (#4.4.2)\
 
 func (d *Smtpd) smtp_greet(code string) error {
 	_ = d.out(code)
-	return d.out(d.Greeting)
+	return d.out(d.cfg.Greeting)
 }
 
 func (d *Smtpd) smtp_help(_ string) error {
@@ -157,23 +176,24 @@ func (d *Smtpd) smtp_quit(_ string) error {
 }
 
 func (d *Smtpd) dohelo(arg string) {
-	d.seenmail = false
 	d.helohost = arg
-	if !strings.EqualFold(d.RemoteHost, d.helohost) {
+	if !strings.EqualFold(d.cfg.RemoteHost, d.helohost) {
 		d.fakehelo = d.helohost
 	}
 }
 
 func (d *Smtpd) smtp_helo(arg string) error {
+	d.seenmail = false
 	d.dohelo(arg)
 	_ = d.smtp_greet("250 ")
 	return d.out("\r\n")
 }
 
 func (d *Smtpd) smtp_ehlo(arg string) error {
+	d.seenmail = false
 	d.dohelo(arg)
 	_ = d.smtp_greet("250-")
-	if d.Auth != nil && !d.authorized {
+	if d.cfg.Auth != nil && !d.authorized {
 		if d.tlsEnabled {
 			_ = d.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
 			_ = d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN") // WTF? =
@@ -182,11 +202,11 @@ func (d *Smtpd) smtp_ehlo(arg string) error {
 			_ = d.out("\r\n250-AUTH=CRAM-MD5") // WTF? =
 		}
 	}
-	if d.Databytes > 0 {
+	if d.cfg.Databytes > 0 {
 		_ = d.out("\r\n250-SIZE ")
-		_ = d.out(strconv.Itoa(d.Databytes))
+		_ = d.out(strconv.Itoa(d.cfg.Databytes))
 	}
-	if d.TLSConfig != nil && !d.tlsEnabled {
+	if d.cfg.TLSConfig != nil && !d.tlsEnabled {
 		_ = d.out("\r\n250-STARTTLS")
 	}
 	_ = d.out("\r\n250-PIPELINING")
@@ -203,11 +223,11 @@ func (d *Smtpd) smtp_mail(arg string) error {
 	if !ok {
 		return d.err_syntax()
 	}
-	if d.LocalIPHost != "" {
-		addr = replaceLocalIP(addr, d.LocalIPHost, d.IPMe)
+	if d.cfg.LocalIPHost != "" {
+		addr = replaceLocalIP(addr, d.cfg.LocalIPHost, d.cfg.IPMe)
 	}
 	// TODO: check SIZE parameter
-	d.flagbarf = d.BadMailFrom != nil && d.BadMailFrom.Match(addr)
+	d.flagbarf = d.cfg.BadMailFrom != nil && d.cfg.BadMailFrom.Match(addr)
 	d.seenmail = true
 	d.rcptto = d.rcptto[:0]
 	d.mailfrom = addr
@@ -222,20 +242,20 @@ func (d *Smtpd) smtp_rcpt(arg string) error {
 	if !ok {
 		return d.err_syntax()
 	}
-	if d.LocalIPHost != "" {
-		addr = replaceLocalIP(addr, d.LocalIPHost, d.IPMe)
+	if d.cfg.LocalIPHost != "" {
+		addr = replaceLocalIP(addr, d.cfg.LocalIPHost, d.cfg.IPMe)
 	}
 	if d.flagbarf {
 		return d.err_bmf()
 	}
-	if d.RelayClientOk {
-		addr += d.RelayClient
+	if d.relayClientOk {
+		addr += d.relayClient
 	} else {
-		if d.RcptHosts != nil && !d.RcptHosts.Match(addr) {
+		if d.cfg.RcptHosts != nil && !d.cfg.RcptHosts.Match(addr) {
 			return d.err_nogateway()
 		}
 		// Дополнительная проверка: если домен в mbxhosts, проверить существование ящика
-		if d.MbxHosts != nil && !d.MbxHosts.Match(addr) {
+		if d.cfg.MbxHosts != nil && !d.cfg.MbxHosts.Match(addr) {
 			return d.out("553 mailbox does not exist (#5.1.1)\r\n")
 		}
 	}
@@ -252,6 +272,25 @@ func (d *Smtpd) acceptmessage(qp int) error {
 	return d.out("\r\n")
 }
 
+func (d *Smtpd) prepareQmailEnv() []string {
+	env := []string{
+		"TCPREMOTEIP=" + d.cfg.RemoteIP,
+		"TCPREMOTEHOST=" + d.cfg.RemoteHost,
+		"PROTO=SMTP",
+		"DATABYTES=" + strconv.Itoa(d.cfg.Databytes),
+	}
+	if d.authorized {
+		env = append(env, "TCPREMOTEINFO="+d.remoteInfo)
+	}
+	if d.relayClientOk {
+		env = append(env, "RELAYCLIENT="+d.relayClient)
+	}
+	if v, ok := os.LookupEnv("QMAILQUEUE"); ok {
+		env = append(env, "QMAILQUEUE="+v)
+	}
+	return env
+}
+
 func (d *Smtpd) smtp_data(_ string) error {
 	if !d.seenmail {
 		return d.err_wantmail()
@@ -260,21 +299,21 @@ func (d *Smtpd) smtp_data(_ string) error {
 		return d.err_wantrcpt()
 	}
 	d.seenmail = false
-	if d.Qmail == nil {
+	if d.cfg.Qmail == nil {
 		return d.err_qqt()
 	}
 	var err error
-	d.qqt, err = d.Qmail.Open()
+	d.qqt, err = d.cfg.Qmail.Open(d.prepareQmailEnv())
 	if err != nil {
 		return d.err_qqt()
 	}
 	qp := d.qqt.Pid()
 	d.out("354 go ahead\r\n")
 
-	received(d.qqt, "SMTP", d.LocalHost, d.RemoteIP, d.RemoteHost, d.RemoteInfo, d.fakehelo)
+	received(d.qqt, "SMTP", d.cfg.LocalHost, d.cfg.RemoteIP, d.cfg.RemoteHost, d.remoteInfo, d.fakehelo)
 
-	if d.Databytes != 0 {
-		d.bytestooverflow = uint(d.Databytes) + 1
+	if d.cfg.Databytes != 0 {
+		d.bytestooverflow = uint(d.cfg.Databytes) + 1
 	}
 	hops, err := d.blast()
 	if err != nil {
@@ -301,7 +340,7 @@ func (d *Smtpd) smtp_data(_ string) error {
 	if too_many_hops {
 		return d.out("554 too many hops, this message is looping (#5.4.6)\r\n")
 	}
-	if d.Databytes != 0 && d.bytestooverflow == 0 {
+	if d.cfg.Databytes != 0 && d.bytestooverflow == 0 {
 		return d.out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
 	}
 
@@ -342,14 +381,14 @@ func (d *Smtpd) createCommadsTable() map[string]command {
 }
 
 func (d *Smtpd) Run(conn net.Conn) error {
-	if d.Log != nil {
-		d.login = d.Log.WithPrefix("=> ")
-		d.logout = d.Log.WithPrefix("<= ")
+	if d.cfg.Log != nil {
+		d.login = d.cfg.Log.WithPrefix("=> ")
+		d.logout = d.cfg.Log.WithPrefix("<= ")
 	}
 
 	d.initIO(conn)
+	d.dohelo(d.cfg.RemoteHost)
 
-	d.dohelo(d.RemoteHost)
 	d.smtp_greet("220 ")
 	d.out(" ESMTP\r\n")
 

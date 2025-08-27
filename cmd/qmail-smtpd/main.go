@@ -25,8 +25,8 @@ import (
 
 type qmailAdapter struct{}
 
-func (qa qmailAdapter) Open() (smtpd.QmailQueue, error) {
-	return qmail.Open()
+func (qa qmailAdapter) Open(env []string) (smtpd.QmailQueue, error) {
+	return qmail.Open(env)
 }
 
 type rcpthostsAdapter struct{}
@@ -84,11 +84,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	d := mustSetupSmtpd()
+	d := prepareConfig()
 	if len(os.Args) > 1 {
 		d.Hostname = os.Args[1]
 		d.Auth = authAdapter{childargs: os.Args[2:]}
 	}
+
+	srv := smtpd.New(d)
 
 	c := &conn.Conn{
 		Reader:   os.Stdin,
@@ -97,7 +99,7 @@ func main() {
 		RemoteIP: conn.Addr(d.RemoteIP),
 	}
 
-	if err := d.Run(c); err != nil {
+	if err := srv.Run(c); err != nil {
 		log.Fatalf("run failed: %v", err)
 	}
 }
@@ -112,8 +114,8 @@ func die_ipme() {
 	os.Exit(1)
 }
 
-func mustSetupSmtpd() *smtpd.Smtpd {
-	var d smtpd.Smtpd
+func prepareConfig() *smtpd.Config {
+	var d smtpd.Config
 
 	if control.Init() == -1 {
 		die_control()
@@ -198,7 +200,7 @@ func mustSetupSmtpd() *smtpd.Smtpd {
 		d.RemoteHost = "unknown"
 	}
 
-	d.RemoteInfo = os.Getenv("TCPREMOTEINFO")
+	// cfg.RemoteInfo = os.Getenv("TCPREMOTEINFO") // ignoring
 	d.RelayClient, d.RelayClientOk = os.LookupEnv("RELAYCLIENT")
 
 	if !ipme.Init() {

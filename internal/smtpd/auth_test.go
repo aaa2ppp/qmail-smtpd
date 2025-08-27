@@ -20,13 +20,13 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"334 \r\n", // <SP> required
 		},
 		{
 			"Hello, 世界",
-			&Smtpd{},
+			New(&Config{}),
 			args{"Hello, 世界"},
 			"334 SGVsbG8sIOS4lueVjA==\r\n",
 		},
@@ -55,7 +55,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Smtpd{},
+			New(&Config{}),
 			"\r\n",
 			"",
 			true,
@@ -63,7 +63,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		},
 		{
 			"no base64",
-			&Smtpd{},
+			New(&Config{}),
 			"Hello, world!\r\n",
 			"",
 			false,
@@ -71,7 +71,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		},
 		{
 			"base64",
-			&Smtpd{},
+			New(&Config{}),
 			"SGVsbG8sIOS4lueVjA==\r\n",
 			"Hello, 世界",
 			true,
@@ -79,7 +79,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		},
 		{
 			"*",
-			&Smtpd{},
+			New(&Config{}),
 			"*\n",
 			"",
 			false,
@@ -88,14 +88,14 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		// TODO: какое поведение должно быть в этом случае?
 		// {
 		// 	"leader spaces",
-		// 	&Smtpd{},
+		// 	New(&Config{},
 		// 	"  SGVsbG8sIOS4lueVjA==\r\n",
 		// 	"",
 		// 	false,
 		// },
 		// {
 		// 	"finaller spaces",
-		// 	&Smtpd{},
+		// 	New(&Config{},
 		// 	"SGVsbG8sIOS4lueVjA==  \r\n",
 		// 	"",
 		// 	false,
@@ -137,7 +137,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{
@@ -149,7 +149,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		},
 		{
 			"no username1",
-			&Smtpd{},
+			New(&Config{}),
 			args{"="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{},
@@ -158,7 +158,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		},
 		{
 			"no username2",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{},
@@ -167,7 +167,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		},
 		{
 			"no password",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\n\r\n",
 			authAttributes{
@@ -178,7 +178,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		},
 		{
 			"vasya@pupkin.org",
-			&Smtpd{},
+			New(&Config{}),
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{
@@ -190,7 +190,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		},
 		{
 			"abort",
-			&Smtpd{},
+			New(&Config{}),
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"*\r\n",
 			authAttributes{},
@@ -238,7 +238,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{
@@ -250,7 +250,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		},
 		{
 			"argument",
-			&Smtpd{},
+			New(&Config{}),
 			args{"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA"},
 			"",
 			authAttributes{
@@ -262,7 +262,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		},
 		{
 			"empty argument (=)",
-			&Smtpd{},
+			New(&Config{}),
 			args{"="},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{},
@@ -271,7 +271,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		},
 		{
 			"no response",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"\r\n",
 			authAttributes{},
@@ -280,7 +280,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		},
 		{
 			"abort",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"*\r\n",
 			authAttributes{},
@@ -328,7 +328,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Smtpd{Hostname: "mx.pupkin.org"},
+			New(&Config{Hostname: "mx.pupkin.org"}),
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZyBhNGZlYTY2YjJhYjA4ZjEyZGI5OTYyMTlmZTc3YTM1Yw==\r\n",
 			authAttributes{
@@ -341,7 +341,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		},
 		{
 			"empty argument (=)",
-			&Smtpd{Hostname: "mx.pupkin.org"},
+			New(&Config{Hostname: "mx.pupkin.org"}),
 			args{"="},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{},
@@ -350,7 +350,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		},
 		{
 			"no response",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"\r\n",
 			authAttributes{},
@@ -359,7 +359,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		},
 		{
 			"abort",
-			&Smtpd{},
+			New(&Config{}),
 			args{""},
 			"*\r\n",
 			authAttributes{},

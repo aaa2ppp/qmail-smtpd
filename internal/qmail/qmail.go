@@ -17,7 +17,7 @@ type Qmail struct {
 	stickyErr error
 }
 
-func Open() (qq *Qmail, err error) {
+func Open(env []string) (qq *Qmail, err error) {
 	var (
 		cmd *exec.Cmd
 		fdm *os.File
@@ -59,6 +59,7 @@ func Open() (qq *Qmail, err error) {
 	}
 
 	cmd.Stderr = os.Stderr
+	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {
 		return nil, err

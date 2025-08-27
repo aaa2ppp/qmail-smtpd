@@ -151,7 +151,7 @@ func (d *Smtpd) auth_cram(arg string) (authAttributes, error) {
 		return aa, cmp.Or(d.auth_err_input(), ErrAuthFailed)
 	}
 
-	aa.pass = cram_request(d.Hostname)
+	aa.pass = cram_request(d.cfg.Hostname)
 	if err := d.auth_prompt(aa.pass); err != nil {
 		return aa, err
 	}
@@ -179,7 +179,7 @@ func (d *Smtpd) auth_cram(arg string) (authAttributes, error) {
 }
 
 func (d *Smtpd) smtp_auth(arg string) error {
-	if d.Auth == nil || d.Hostname == "" {
+	if d.cfg.Auth == nil || d.cfg.Hostname == "" {
 		return d.out("503 auth not available (#5.3.3)\r\n")
 	}
 	if d.authorized {
@@ -226,13 +226,24 @@ func (d *Smtpd) smtp_auth(arg string) error {
 		return err
 	}
 
-	if !d.Auth.Authenticate(aa.user, aa.pass, aa.resp) {
+	if !d.cfg.Auth.Authenticate(aa.user, aa.pass, aa.resp) {
 		return d.out("535 authorization failed (#5.7.0)\r\n")
 	}
 
-	d.authorized = true
-	d.RelayClient = ""
-	d.RelayClientOk = true
-	d.RemoteInfo = aa.user
+	d.setAuthorized(aa.user)
 	return d.out("235 ok, go ahead (#2.0.0)\r\n")
+}
+
+func (d *Smtpd) setAuthorized(user string) {
+	d.authorized = true
+	d.remoteInfo = user
+	d.relayClient = ""
+	d.relayClientOk = true
+}
+
+func (d *Smtpd) resetAuthorized() {
+	d.authorized = false
+	d.remoteInfo = ""
+	d.relayClient = d.cfg.RelayClient
+	d.relayClientOk = d.cfg.RelayClientOk
 }

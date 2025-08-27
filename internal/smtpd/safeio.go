@@ -50,7 +50,7 @@ func (w *safeWriter) Write(b []byte) (int, error) {
 }
 
 func (d *Smtpd) initIO(conn net.Conn) {
-	timeout := d.Timeout
+	timeout := d.cfg.Timeout
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
