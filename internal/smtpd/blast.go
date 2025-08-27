@@ -1,6 +1,7 @@
 package smtpd
 
 import (
+	"cmp"
 	"errors"
 	"os"
 )
@@ -17,7 +18,14 @@ func (d *Smtpd) put(ch byte) {
 	d.qqt.Putc(ch)
 }
 
-func (d *Smtpd) blast() int {
+var ErrStrayNewLine = errors.New("stray new line")
+
+func straynewline(d *Smtpd) error {
+	d.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
+	return cmp.Or(d.flush(), ErrStrayNewLine)
+}
+
+func blast(d *Smtpd) (int, error) {
 	hops := 0
 	state := 1
 	flaginheader := true
@@ -30,9 +38,9 @@ func (d *Smtpd) blast() int {
 		ch, err := d.ssin.ReadByte()
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				d.die_alarm()
+				err_timeout(d)
 			}
-			d.die_read()
+			return hops, err
 		}
 
 		if flaginheader {
@@ -70,7 +78,7 @@ func (d *Smtpd) blast() int {
 		switch state {
 		case 0:
 			if ch == '\n' {
-				d.straynewline()
+				return hops, straynewline(d)
 			}
 			if ch == '\r' {
 				state = 4
@@ -78,7 +86,7 @@ func (d *Smtpd) blast() int {
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				d.straynewline()
+				return hops, straynewline(d)
 			}
 			if ch == '.' {
 				state = 2
@@ -91,7 +99,7 @@ func (d *Smtpd) blast() int {
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				d.straynewline()
+				return hops, straynewline(d)
 			}
 			if ch == '\r' {
 				state = 3
@@ -100,7 +108,7 @@ func (d *Smtpd) blast() int {
 			state = 0
 		case 3: /* \r\n + .\r */
 			if ch == '\n' {
-				return hops
+				return hops, nil
 			}
 			d.put('.')
 			d.put('\r')

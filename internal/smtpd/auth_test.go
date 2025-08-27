@@ -36,7 +36,7 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &bytes.Buffer{}
 			tt.d.ssout = bufio.NewWriter(w)
-			tt.d.auth_prompt(tt.args.prompt)
+			auth_prompt(tt.d, tt.args.prompt)
 			if w.String() != tt.Want {
 				t.Errorf("out = %q, want %q", w.String(), tt.Want)
 			}
@@ -46,12 +46,12 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 
 func TestSmtpd_auth_gets(t *testing.T) {
 	tests := []struct {
-		name    string
-		d       *Smtpd
-		input   string
-		want    string
-		want1   bool
-		wantOut string
+		name      string
+		d         *Smtpd
+		input     string
+		want      string
+		wantNoErr bool
+		wantOut   string
 	}{
 		{
 			"<empty>",
@@ -107,13 +107,13 @@ func TestSmtpd_auth_gets(t *testing.T) {
 			w := &bytes.Buffer{}
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
-			got, got1 := tt.d.auth_getln()
+			got, err := auth_getln(tt.d)
 			tt.d.flush()
 			if got != tt.want {
 				t.Errorf("Smtpd.auth_gets() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("Smtpd.auth_gets() got1 = %v, want %v", got1, tt.want1)
+			if (err == nil) != tt.wantNoErr {
+				t.Errorf("Smtpd.auth_gets() err = %v, want %v", err, !tt.wantNoErr)
 			}
 			if out := w.String(); !strings.HasPrefix(out, tt.wantOut) {
 				t.Errorf("out = %q, want %q", out, tt.wantOut)
@@ -132,7 +132,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		args      args
 		input     string
 		want      authAttributes
-		want1     bool
+		wantNoErr bool
 		wantCodes []int
 	}{
 		{
@@ -205,14 +205,14 @@ func TestSmtpd_auth_login(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, got1 := tt.d.auth_login(tt.args.arg)
+			got, err := auth_login(tt.d, tt.args.arg)
 			tt.d.flush()
 
-			if got1 && !reflect.DeepEqual(got, tt.want) {
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("Smtpd.auth_login() got1 = %v, want %v", got1, tt.want1)
+			if (err == nil) != tt.wantNoErr {
+				t.Errorf("Smtpd.auth_login() err = %v, want %v", err, !tt.wantNoErr)
 			}
 			out := w.String()
 			if codes := extractCodes(out); !reflect.DeepEqual(codes, tt.wantCodes) {
@@ -233,7 +233,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		args      args
 		input     string
 		want      authAttributes
-		want1     bool
+		wantNoErr bool
 		wantCodes []int
 	}{
 		{
@@ -295,14 +295,14 @@ func TestSmtpd_auth_plain(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, got1 := tt.d.auth_plain(tt.args.arg)
+			got, err := auth_plain(tt.d, tt.args.arg)
 			tt.d.flush()
 
-			if got1 && !reflect.DeepEqual(got, tt.want) {
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("Smtpd.auth_login() got1 = %v, want %v", got1, tt.want1)
+			if (err == nil) != tt.wantNoErr {
+				t.Errorf("Smtpd.auth_login() err = %v, want %v", err, !tt.wantNoErr)
 			}
 			out := w.String()
 			if codes := extractCodes(out); !reflect.DeepEqual(codes, tt.wantCodes) {
@@ -323,7 +323,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		args      args
 		input     string
 		want      authAttributes
-		want1     bool
+		wantNoErr bool
 		wantCodes []int
 	}{
 		{
@@ -382,14 +382,14 @@ func TestSmtpd_auth_cram(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, got1 := tt.d.auth_cram(tt.args.arg)
+			got, err := auth_cram(tt.d, tt.args.arg)
 			tt.d.flush()
 
-			if got1 && !attributesIsEqual(got, tt.want) {
+			if err == nil && !attributesIsEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("Smtpd.auth_login() got1 = %v, want %v", got1, tt.want1)
+			if (err == nil) != tt.wantNoErr {
+				t.Errorf("Smtpd.auth_login() err = %v, want %v", err, !tt.wantNoErr)
 			}
 			out := w.String()
 			if codes := extractCodes(out); !reflect.DeepEqual(codes, tt.wantCodes) {

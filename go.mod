@@ -1,3 +1,3 @@
 module qmail-smtpd
 
-go 1.21.8
+go 1.22

@@ -2,59 +2,59 @@ package smtpd
 
 import (
 	"bufio"
-	"io"
 	"net"
 	"time"
 )
 
-type innerReader interface {
-	io.Reader
-	SetReadDeadline(time.Time) error
-}
-
-type innerWriter interface {
-	io.Writer
-	SetWriteDeadline(time.Time) error
-}
-
 type safeReader struct {
-	inner   innerReader
+	conn    net.Conn
 	timeout time.Duration
-	flush   func()
+	flush   func() error
 }
 
-func (sr *safeReader) Read(b []byte) (int, error) {
-	if sr.flush != nil {
-		sr.flush()
+func (r *safeReader) Read(b []byte) (int, error) {
+	if r.flush != nil {
+		if err := r.flush(); err != nil {
+			return 0, err
+		}
 	}
-	if sr.timeout != 0 {
-		sr.inner.SetReadDeadline(time.Now().Add(sr.timeout))
+	if r.timeout > 0 {
+		if err := r.conn.SetReadDeadline(time.Now().Add(r.timeout)); err != nil {
+			return 0, err
+		}
 	}
-	return sr.inner.Read(b)
+	return r.conn.Read(b)
 }
 
 type safeWriter struct {
-	inner   innerWriter
+	conn    net.Conn
 	timeout time.Duration
 }
 
 func (sr *safeWriter) Write(b []byte) (int, error) {
-	if sr.timeout != 0 {
-		sr.inner.SetWriteDeadline(time.Now().Add(sr.timeout))
+	if sr.timeout > 0 {
+		sr.conn.SetWriteDeadline(time.Now().Add(sr.timeout))
 	}
-	return sr.inner.Write(b)
+	return sr.conn.Write(b)
 }
 
-func (d *Smtpd) safeio_init(conn net.Conn) {
+func (d *Smtpd) initIO(conn net.Conn) {
 	timeout := d.Timeout
 	if timeout < 0 {
-		panic("Smtpd.safeio_init: timeout cannot be negative")
+		panic("Smtpd.initIO: timeout cannot be negative")
 	}
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
 	conn.SetDeadline(time.Time{})
-	d.ssin = bufio.NewReader(&safeReader{inner: conn, timeout: timeout, flush: d.flush})
-	d.ssout = bufio.NewWriter(&safeWriter{inner: conn, timeout: timeout})
+	d.ssin = bufio.NewReader(&safeReader{
+		conn:    conn,
+		timeout: timeout,
+		flush:   d.flush,
+	})
+	d.ssout = bufio.NewWriter(&safeWriter{
+		conn:    conn,
+		timeout: timeout,
+	})
 	d.conn = conn
 }
