@@ -3,6 +3,7 @@ package smtpd
 import (
 	"bufio"
 	"net"
+	"os"
 	"time"
 )
 
@@ -19,8 +20,12 @@ func (r *safeReader) Read(b []byte) (int, error) {
 		}
 	}
 	if r.timeout > 0 {
-		if err := r.conn.SetReadDeadline(time.Now().Add(r.timeout)); err != nil {
-			return 0, err
+		deadline := time.Now().Add(r.timeout)
+		if err := r.conn.SetReadDeadline(deadline); err != nil {
+			if err != os.ErrNoDeadline {
+				return 0, err
+			}
+			r.timeout = 0 // to avoid trying next time
 		}
 	}
 	return r.conn.Read(b)
@@ -31,18 +36,21 @@ type safeWriter struct {
 	timeout time.Duration
 }
 
-func (sr *safeWriter) Write(b []byte) (int, error) {
-	if sr.timeout > 0 {
-		sr.conn.SetWriteDeadline(time.Now().Add(sr.timeout))
+func (w *safeWriter) Write(b []byte) (int, error) {
+	if w.timeout > 0 {
+		deadline := time.Now().Add(w.timeout)
+		if err := w.conn.SetWriteDeadline(deadline); err != nil {
+			if err != os.ErrNoDeadline {
+				return 0, err
+			}
+			w.timeout = 0 // to avoid trying next time
+		}
 	}
-	return sr.conn.Write(b)
+	return w.conn.Write(b)
 }
 
 func (d *Smtpd) initIO(conn net.Conn) {
 	timeout := d.Timeout
-	if timeout < 0 {
-		panic("Smtpd.initIO: timeout cannot be negative")
-	}
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}

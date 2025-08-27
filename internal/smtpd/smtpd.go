@@ -48,6 +48,8 @@ const (
 	DefaultTimeout = 1200 * time.Second // WTF: why so many?
 )
 
+var ErrClientQuit = errors.New("client quit")
+
 type Smtpd struct {
 	Greeting      string
 	Databytes     int
@@ -151,7 +153,7 @@ func (d *Smtpd) smtp_help(_ string) error {
 func (d *Smtpd) smtp_quit(_ string) error {
 	_ = d.smtp_greet("221 ")
 	_ = d.out("\r\n")
-	return cmp.Or(d.flush(), io.EOF)
+	return cmp.Or(d.flush(), ErrClientQuit)
 }
 
 func (d *Smtpd) dohelo(arg string) {
@@ -174,10 +176,10 @@ func (d *Smtpd) smtp_ehlo(arg string) error {
 	if d.Auth != nil && !d.authorized {
 		if d.tlsEnabled {
 			_ = d.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
-			_ = d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN") // WTF?
+			_ = d.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN") // WTF? =
 		} else {
 			_ = d.out("\r\n250-AUTH CRAM-MD5")
-			_ = d.out("\r\n250-AUTH=CRAM-MD5") // WTF?
+			_ = d.out("\r\n250-AUTH=CRAM-MD5") // WTF? =
 		}
 	}
 	if d.Databytes > 0 {
@@ -321,7 +323,7 @@ type command struct {
 
 const unimpl = "unimpl"
 
-func (d *Smtpd) getCommadsTable() map[string]command {
+func (d *Smtpd) createCommadsTable() map[string]command {
 	return map[string]command{
 		"rcpt":     {d.smtp_rcpt, false},
 		"mail":     {d.smtp_mail, false},
@@ -333,13 +335,13 @@ func (d *Smtpd) getCommadsTable() map[string]command {
 		"rset":     {d.smtp_rset, false},
 		"help":     {d.smtp_help, true},
 		"starttls": {d.smtp_tls, false},
-		"noop":     {d.err_noop, true}, // WTF? почему err_noop, а не smtp_noop?
-		"vrfy":     {d.err_vrfy, true}, // WTF? аналогично?
-		unimpl:     {d.err_unimpl, true},
+		"noop":     {d.err_noop, true},   // WTF: почему err_noop, а не smtp_noop?
+		"vrfy":     {d.err_vrfy, true},   // WTF: аналогично?
+		unimpl:     {d.err_unimpl, true}, // WTF: аналогично?
 	}
 }
 
-func (d *Smtpd) Run(conn net.Conn) (err error) {
+func (d *Smtpd) Run(conn net.Conn) error {
 	if d.Log != nil {
 		d.login = d.Log.WithPrefix("=> ")
 		d.logout = d.Log.WithPrefix("<= ")
@@ -351,10 +353,8 @@ func (d *Smtpd) Run(conn net.Conn) (err error) {
 	d.smtp_greet("220 ")
 	d.out(" ESMTP\r\n")
 
-	c := d.getCommadsTable()
-	err = d.commands(c)
-
-	if err != io.EOF {
+	ct := d.createCommadsTable()
+	if err := d.commands(ct); err != nil && err != ErrClientQuit {
 		return err
 	}
 

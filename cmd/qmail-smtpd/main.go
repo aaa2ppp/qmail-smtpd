@@ -98,7 +98,7 @@ func main() {
 	}
 
 	if err := d.Run(c); err != nil {
-		log.Fatal(err)
+		log.Fatalf("run failed: %v", err)
 	}
 }
 
