@@ -25,7 +25,7 @@ func (d *Smtpd) commands(c map[string]command) error {
 			cmd = c[unimpl]
 		}
 
-		if err := cmd.handler(d, arg); err != nil {
+		if err := cmd.handler(arg); err != nil {
 			return err
 		}
 

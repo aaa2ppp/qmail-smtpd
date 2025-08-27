@@ -108,7 +108,7 @@ func (d *Smtpd) getln() (string, error) {
 	s, err := d.ssin.ReadString('\n')
 	if err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			err_timeout(d)
+			d.err_timeout()
 			d.flush()
 		}
 		return "", err
@@ -124,32 +124,31 @@ func (d *Smtpd) getln() (string, error) {
 	return s, nil
 }
 
-func err_bmf(d *Smtpd) error {
+func (d *Smtpd) err_bmf() error {
 	return d.out("553 sorry, your envelope sender is in my badmailfrom list (#5.7.1)\r\n")
 }
-func err_nogateway(d *Smtpd) error {
+func (d *Smtpd) err_nogateway() error {
 	return d.out("553 sorry, that domain isn't in my list of allowed rcpthosts (#5.7.1)\r\n")
 }
-func err_syntax(d *Smtpd) error   { return d.out("555 syntax error (#5.5.4)\r\n") }
-func err_wantmail(d *Smtpd) error { return d.out("503 MAIL first (#5.5.1)\r\n") }
-func err_wantrcpt(d *Smtpd) error { return d.out("503 RCPT first (#5.5.1)\r\n") }
-func err_qqt(d *Smtpd) error      { return d.out("451 qqt failure (#4.3.0)\r\n") }
-func err_timeout(d *Smtpd) error  { return d.out("451 timeout (#4.4.2)\r\n") }
-
-func smtp_unimpl(d *Smtpd, _ string) error { return d.out("502 unimplemented (#5.5.1)\r\n") }
-func smtp_noop(d *Smtpd, _ string) error   { return d.out("250 ok\r\n") }
-func smtp_vrfy(d *Smtpd, _ string) error   { return d.out("252 send some mail, i'll try my best\r\n") }
+func (d *Smtpd) err_unimpl(_ string) error { return d.out("502 unimplemented (#5.5.1)\r\n") }
+func (d *Smtpd) err_syntax() error         { return d.out("555 syntax error (#5.5.4)\r\n") }
+func (d *Smtpd) err_wantmail() error       { return d.out("503 MAIL first (#5.5.1)\r\n") }
+func (d *Smtpd) err_wantrcpt() error       { return d.out("503 RCPT first (#5.5.1)\r\n") }
+func (d *Smtpd) err_noop(_ string) error   { return d.out("250 ok\r\n") }
+func (d *Smtpd) err_vrfy(_ string) error   { return d.out("252 send some mail, i'll try my best\r\n") }
+func (d *Smtpd) err_qqt() error            { return d.out("451 qqt failure (#4.3.0)\r\n") }
+func (d *Smtpd) err_timeout() error        { return d.out("451 timeout (#4.4.2)\r\n") }
 
 func (d *Smtpd) smtp_greet(code string) error {
 	_ = d.out(code)
 	return d.out(d.Greeting)
 }
 
-func smtp_help(d *Smtpd, _ string) error {
+func (d *Smtpd) smtp_help(_ string) error {
 	return d.out("214 qmail home page: http://pobox.com/~djb/qmail.html\r\n")
 }
 
-func smtp_quit(d *Smtpd, _ string) error {
+func (d *Smtpd) smtp_quit(_ string) error {
 	_ = d.smtp_greet("221 ")
 	_ = d.out("\r\n")
 	return cmp.Or(d.flush(), io.EOF)
@@ -163,13 +162,13 @@ func (d *Smtpd) dohelo(arg string) {
 	}
 }
 
-func smtp_helo(d *Smtpd, arg string) error {
+func (d *Smtpd) smtp_helo(arg string) error {
 	d.dohelo(arg)
 	_ = d.smtp_greet("250 ")
 	return d.out("\r\n")
 }
 
-func smtp_ehlo(d *Smtpd, arg string) error {
+func (d *Smtpd) smtp_ehlo(arg string) error {
 	d.dohelo(arg)
 	_ = d.smtp_greet("250-")
 	if d.Auth != nil && !d.authorized {
@@ -192,15 +191,15 @@ func smtp_ehlo(d *Smtpd, arg string) error {
 	return d.out("\r\n250 8BITMIME\r\n")
 }
 
-func smtp_rset(d *Smtpd, args string) error {
+func (d *Smtpd) smtp_rset(args string) error {
 	d.seenmail = false
 	return d.out("250 flushed\r\n")
 }
 
-func smtp_mail(d *Smtpd, arg string) error {
+func (d *Smtpd) smtp_mail(arg string) error {
 	addr, ok := addrparse(arg)
 	if !ok {
-		return err_syntax(d)
+		return d.err_syntax()
 	}
 	if d.LocalIPHost != "" {
 		addr = replaceLocalIP(addr, d.LocalIPHost, d.IPMe)
@@ -213,25 +212,25 @@ func smtp_mail(d *Smtpd, arg string) error {
 	return d.out("250 ok\r\n")
 }
 
-func smtp_rcpt(d *Smtpd, arg string) error {
+func (d *Smtpd) smtp_rcpt(arg string) error {
 	if !d.seenmail {
-		return err_wantmail(d)
+		return d.err_wantmail()
 	}
 	addr, ok := addrparse(arg)
 	if !ok {
-		return err_syntax(d)
+		return d.err_syntax()
 	}
 	if d.LocalIPHost != "" {
 		addr = replaceLocalIP(addr, d.LocalIPHost, d.IPMe)
 	}
 	if d.flagbarf {
-		return err_bmf(d)
+		return d.err_bmf()
 	}
 	if d.RelayClientOk {
 		addr += d.RelayClient
 	} else {
 		if d.RcptHosts != nil && !d.RcptHosts.Match(addr) {
-			return err_nogateway(d)
+			return d.err_nogateway()
 		}
 		// Дополнительная проверка: если домен в mbxhosts, проверить существование ящика
 		if d.MbxHosts != nil && !d.MbxHosts.Match(addr) {
@@ -242,7 +241,7 @@ func smtp_rcpt(d *Smtpd, arg string) error {
 	return d.out("250 ok\r\n")
 }
 
-func acceptmessage(d *Smtpd, qp int) error {
+func (d *Smtpd) acceptmessage(qp int) error {
 	when := time.Now()
 	_ = d.out("250 ok ")
 	_ = d.out(strconv.Itoa(int(when.Unix())))
@@ -251,21 +250,21 @@ func acceptmessage(d *Smtpd, qp int) error {
 	return d.out("\r\n")
 }
 
-func smtp_data(d *Smtpd, _ string) error {
+func (d *Smtpd) smtp_data(_ string) error {
 	if !d.seenmail {
-		return err_wantmail(d)
+		return d.err_wantmail()
 	}
 	if len(d.rcptto) == 0 {
-		return err_wantrcpt(d)
+		return d.err_wantrcpt()
 	}
 	d.seenmail = false
 	if d.Qmail == nil {
-		return err_qqt(d)
+		return d.err_qqt()
 	}
 	var err error
 	d.qqt, err = d.Qmail.Open()
 	if err != nil {
-		return err_qqt(d)
+		return d.err_qqt()
 	}
 	qp := d.qqt.Pid()
 	d.out("354 go ahead\r\n")
@@ -275,7 +274,7 @@ func smtp_data(d *Smtpd, _ string) error {
 	if d.Databytes != 0 {
 		d.bytestooverflow = uint(d.Databytes) + 1
 	}
-	hops, err := blast(d)
+	hops, err := d.blast()
 	if err != nil {
 		return err
 	}
@@ -295,7 +294,7 @@ func smtp_data(d *Smtpd, _ string) error {
 	d.qqt = nil
 
 	if qqx == "" {
-		return acceptmessage(d, qp)
+		return d.acceptmessage(qp)
 	}
 	if too_many_hops {
 		return d.out("554 too many hops, this message is looping (#5.4.6)\r\n")
@@ -313,29 +312,31 @@ func smtp_data(d *Smtpd, _ string) error {
 	return d.out("\r\n")
 }
 
-type Handler func(d *Smtpd, arg string) error
+type handlerFunc = func(arg string) error
 
 type command struct {
-	handler   Handler
+	handler   handlerFunc
 	needFlush bool
 }
 
 const unimpl = "unimpl"
 
-var c = map[string]command{
-	"rcpt":     {smtp_rcpt, false},
-	"mail":     {smtp_mail, false},
-	"data":     {smtp_data, true},
-	"auth":     {smtp_auth, true},
-	"quit":     {smtp_quit, true},
-	"helo":     {smtp_helo, true},
-	"ehlo":     {smtp_ehlo, true},
-	"rset":     {smtp_rset, false},
-	"help":     {smtp_help, true},
-	"starttls": {smtp_tls, false},
-	"noop":     {smtp_noop, true},
-	"vrfy":     {smtp_vrfy, true},
-	unimpl:     {smtp_unimpl, true},
+func (d *Smtpd) getCommadsTable() map[string]command {
+	return map[string]command{
+		"rcpt":     {d.smtp_rcpt, false},
+		"mail":     {d.smtp_mail, false},
+		"data":     {d.smtp_data, true},
+		"auth":     {d.smtp_auth, true},
+		"quit":     {d.smtp_quit, true},
+		"helo":     {d.smtp_helo, true},
+		"ehlo":     {d.smtp_ehlo, true},
+		"rset":     {d.smtp_rset, false},
+		"help":     {d.smtp_help, true},
+		"starttls": {d.smtp_tls, false},
+		"noop":     {d.err_noop, true}, // WTF? почему err_noop, а не smtp_noop?
+		"vrfy":     {d.err_vrfy, true}, // WTF? аналогично?
+		unimpl:     {d.err_unimpl, true},
+	}
 }
 
 func (d *Smtpd) Run(conn net.Conn) (err error) {
@@ -350,6 +351,7 @@ func (d *Smtpd) Run(conn net.Conn) (err error) {
 	d.smtp_greet("220 ")
 	d.out(" ESMTP\r\n")
 
+	c := d.getCommadsTable()
 	err = d.commands(c)
 
 	if err != io.EOF {

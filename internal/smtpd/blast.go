@@ -20,12 +20,12 @@ func (d *Smtpd) put(ch byte) {
 
 var ErrStrayNewLine = errors.New("stray new line")
 
-func straynewline(d *Smtpd) error {
+func (d *Smtpd) straynewline() error {
 	d.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
 	return cmp.Or(d.flush(), ErrStrayNewLine)
 }
 
-func blast(d *Smtpd) (int, error) {
+func (d *Smtpd) blast() (int, error) {
 	hops := 0
 	state := 1
 	flaginheader := true
@@ -38,7 +38,7 @@ func blast(d *Smtpd) (int, error) {
 		ch, err := d.ssin.ReadByte()
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				err_timeout(d)
+				d.err_timeout()
 			}
 			return hops, err
 		}
@@ -78,7 +78,7 @@ func blast(d *Smtpd) (int, error) {
 		switch state {
 		case 0:
 			if ch == '\n' {
-				return hops, straynewline(d)
+				return hops, d.straynewline()
 			}
 			if ch == '\r' {
 				state = 4
@@ -86,7 +86,7 @@ func blast(d *Smtpd) (int, error) {
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				return hops, straynewline(d)
+				return hops, d.straynewline()
 			}
 			if ch == '.' {
 				state = 2
@@ -99,7 +99,7 @@ func blast(d *Smtpd) (int, error) {
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				return hops, straynewline(d)
+				return hops, d.straynewline()
 			}
 			if ch == '\r' {
 				state = 3

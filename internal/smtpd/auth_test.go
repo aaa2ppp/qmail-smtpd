@@ -36,7 +36,7 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := &bytes.Buffer{}
 			tt.d.ssout = bufio.NewWriter(w)
-			auth_prompt(tt.d, tt.args.prompt)
+			tt.d.auth_prompt(tt.args.prompt)
 			if w.String() != tt.Want {
 				t.Errorf("out = %q, want %q", w.String(), tt.Want)
 			}
@@ -107,7 +107,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 			w := &bytes.Buffer{}
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
-			got, err := auth_getln(tt.d)
+			got, err := tt.d.auth_getln()
 			tt.d.flush()
 			if got != tt.want {
 				t.Errorf("Smtpd.auth_gets() got = %v, want %v", got, tt.want)
@@ -205,7 +205,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, err := auth_login(tt.d, tt.args.arg)
+			got, err := tt.d.auth_login(tt.args.arg)
 			tt.d.flush()
 
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
@@ -295,7 +295,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, err := auth_plain(tt.d, tt.args.arg)
+			got, err := tt.d.auth_plain(tt.args.arg)
 			tt.d.flush()
 
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
@@ -382,7 +382,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 			tt.d.ssout = bufio.NewWriter(w)
 			tt.d.ssin = bufio.NewReader(strings.NewReader(tt.input))
 
-			got, err := auth_cram(tt.d, tt.args.arg)
+			got, err := tt.d.auth_cram(tt.args.arg)
 			tt.d.flush()
 
 			if err == nil && !attributesIsEqual(got, tt.want) {

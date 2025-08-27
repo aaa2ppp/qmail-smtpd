@@ -18,9 +18,9 @@ type authAttributes struct {
 	resp string
 }
 
-func auth_err_input(d *Smtpd) { d.out("501 malformed auth input (#5.5.4)\r\n") }
+func (d *Smtpd) auth_err_input() { d.out("501 malformed auth input (#5.5.4)\r\n") }
 
-func auth_prompt(d *Smtpd, prompt string) {
+func (d *Smtpd) auth_prompt(prompt string) {
 	d.out("334 ")
 	d.out(b64encode(prompt))
 	d.out("\r\n")
@@ -29,7 +29,7 @@ func auth_prompt(d *Smtpd, prompt string) {
 
 var ErrAuthFailed = errors.New("auth failed")
 
-func auth_getln(d *Smtpd) (string, error) {
+func (d *Smtpd) auth_getln() (string, error) {
 	s, err := d.getln()
 	if err != nil {
 		return "", err
@@ -38,53 +38,53 @@ func auth_getln(d *Smtpd) (string, error) {
 		d.out("501 auth exchange cancelled (#5.0.0)\r\n")
 		return "", ErrAuthFailed
 	}
-	return auth_decode(d, s)
+	return d.auth_decode(s)
 }
 
-func auth_decode(d *Smtpd, s string) (string, error) {
+func (d *Smtpd) auth_decode(s string) (string, error) {
 	var ok bool
 	s, ok = b64decode(s)
 	if !ok {
-		auth_err_input(d)
+		d.auth_err_input()
 		return "", ErrAuthFailed
 	}
 	return s, nil
 }
 
-func auth_login(d *Smtpd, arg string) (authAttributes, error) {
+func (d *Smtpd) auth_login(arg string) (authAttributes, error) {
 	var (
 		aa  authAttributes
 		err error
 	)
 
 	if arg != "" {
-		if aa.user, err = auth_decode(d, arg); err != nil {
+		if aa.user, err = d.auth_decode(arg); err != nil {
 			return aa, err
 		}
 	} else {
-		auth_prompt(d, "Username:")
-		if aa.user, err = auth_getln(d); err != nil {
+		d.auth_prompt("Username:")
+		if aa.user, err = d.auth_getln(); err != nil {
 			return aa, err
 		}
 	}
 	if aa.user == "" {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
-	auth_prompt(d, "Password:")
-	if aa.pass, err = auth_getln(d); err != nil {
+	d.auth_prompt("Password:")
+	if aa.pass, err = d.auth_getln(); err != nil {
 		return aa, err
 	}
 	if aa.pass == "" {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
 	return aa, nil
 }
 
-func auth_plain(d *Smtpd, arg string) (authAttributes, error) {
+func (d *Smtpd) auth_plain(arg string) (authAttributes, error) {
 	var (
 		aa   authAttributes
 		slop string
@@ -92,12 +92,12 @@ func auth_plain(d *Smtpd, arg string) (authAttributes, error) {
 	)
 
 	if arg != "" {
-		if slop, err = auth_decode(d, arg); err != nil {
+		if slop, err = d.auth_decode(arg); err != nil {
 			return aa, err
 		}
 	} else {
-		auth_prompt(d, "")
-		if slop, err = auth_getln(d); err != nil {
+		d.auth_prompt("")
+		if slop, err = d.auth_getln(); err != nil {
 			return aa, err
 		}
 	}
@@ -105,14 +105,14 @@ func auth_plain(d *Smtpd, arg string) (authAttributes, error) {
 	/* ignore authorize-id */
 	i := strings.IndexByte(slop, 0)
 	if i == -1 {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
 	slop = slop[i+1:]
 	i = strings.IndexByte(slop, 0)
 	if i == -1 {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 	aa.user = slop[:i]
@@ -125,7 +125,7 @@ func auth_plain(d *Smtpd, arg string) (authAttributes, error) {
 	aa.pass = slop[:i]
 
 	if aa.user == "" || aa.pass == "" {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
@@ -144,7 +144,7 @@ func cram_request(hostname string) string {
 	return buf.String()
 }
 
-func auth_cram(d *Smtpd, arg string) (authAttributes, error) {
+func (d *Smtpd) auth_cram(arg string) (authAttributes, error) {
 	var (
 		aa   authAttributes
 		slop string
@@ -152,19 +152,19 @@ func auth_cram(d *Smtpd, arg string) (authAttributes, error) {
 	)
 
 	if arg != "" {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
 	aa.pass = cram_request(d.Hostname)
-	auth_prompt(d, aa.pass)
-	if slop, err = auth_getln(d); err != nil {
+	d.auth_prompt(aa.pass)
+	if slop, err = d.auth_getln(); err != nil {
 		return aa, ErrAuthFailed
 	}
 
 	i := strings.IndexByte(slop, ' ')
 	if i == -1 {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 	aa.user = slop[:i]
@@ -176,14 +176,14 @@ func auth_cram(d *Smtpd, arg string) (authAttributes, error) {
 	aa.resp = slop
 
 	if aa.user == "" || aa.resp == "" {
-		auth_err_input(d)
+		d.auth_err_input()
 		return aa, ErrAuthFailed
 	}
 
 	return aa, nil
 }
 
-func smtp_auth(d *Smtpd, arg string) error {
+func (d *Smtpd) smtp_auth(arg string) error {
 	if d.Auth == nil || d.Hostname == "" {
 		return d.out("503 auth not available (#5.3.3)\r\n")
 	}
@@ -205,25 +205,25 @@ func smtp_auth(d *Smtpd, arg string) error {
 		arg = arg[1:]
 	}
 
-	var fn func(d *Smtpd, arg string) (authAttributes, error)
+	var f func(string) (authAttributes, error)
 	switch strings.ToLower(cmd) {
 	case "login":
 		if !d.tlsEnabled {
 			return d.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
-		fn = auth_login
+		f = d.auth_login
 	case "plain":
 		if !d.tlsEnabled {
 			return d.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
-		fn = auth_plain
+		f = d.auth_plain
 	case "cram-md5":
-		fn = auth_cram
+		f = d.auth_cram
 	default:
 		return d.out("504 auth type unimplemented (#5.5.1)\r\n")
 	}
 
-	aa, err := fn(d, arg)
+	aa, err := f(arg)
 	if err != nil {
 		if errors.Is(err, ErrAuthFailed) {
 			return nil
