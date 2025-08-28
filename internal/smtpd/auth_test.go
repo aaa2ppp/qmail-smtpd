@@ -1,8 +1,6 @@
 package smtpd
 
 import (
-	"bufio"
-	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,23 +11,23 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 		prompt string
 	}
 	tests := []struct {
-		name string
-		d    *Config
-		ss   *Session
-		args args
-		Want string
+		name  string
+		cfg   *Config
+		state sessionState
+		args  args
+		Want  string
 	}{
 		{
 			"<empty>",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"334 \r\n", // <SP> required
 		},
 		{
 			"Hello, 世界",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"Hello, 世界"},
 			"334 SGVsbG8sIOS4lueVjA==\r\n",
 		},
@@ -37,12 +35,10 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := &bytes.Buffer{}
-			d := &Smtpd{tt.d}
-			tt.ss.ssout = bufio.NewWriter(w)
-			d.auth_prompt(tt.ss, tt.args.prompt)
-			if w.String() != tt.Want {
-				t.Errorf("out = %q, want %q", w.String(), tt.Want)
+			srv, ss, out := createServerAndSession(tt.cfg, tt.state)
+			srv.auth_prompt(ss, tt.args.prompt)
+			if out.String() != tt.Want {
+				t.Errorf("out = %q, want %q", out.String(), tt.Want)
 			}
 		})
 	}
@@ -51,8 +47,8 @@ func TestSmtpd_auth_prompt(t *testing.T) {
 func TestSmtpd_auth_gets(t *testing.T) {
 	tests := []struct {
 		name      string
-		d         *Config
-		ss        *Session
+		cfg       *Config
+		state     sessionState
 		input     string
 		want      string
 		wantNoErr bool
@@ -61,7 +57,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		{
 			"<empty>",
 			&Config{},
-			&Session{},
+			sessionState{},
 			"\r\n",
 			"",
 			true,
@@ -70,7 +66,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		{
 			"no base64",
 			&Config{},
-			&Session{},
+			sessionState{},
 			"Hello, world!\r\n",
 			"",
 			false,
@@ -79,7 +75,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		{
 			"base64",
 			&Config{},
-			&Session{},
+			sessionState{},
 			"SGVsbG8sIOS4lueVjA==\r\n",
 			"Hello, 世界",
 			true,
@@ -88,7 +84,7 @@ func TestSmtpd_auth_gets(t *testing.T) {
 		{
 			"*",
 			&Config{},
-			&Session{},
+			sessionState{},
 			"*\n",
 			"",
 			false,
@@ -113,12 +109,11 @@ func TestSmtpd_auth_gets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := &bytes.Buffer{}
-			d := &Smtpd{tt.d}
-			tt.ss.ssout = bufio.NewWriter(w)
-			tt.ss.ssin = bufio.NewReader(strings.NewReader(tt.input))
-			got, err := d.auth_getln(tt.ss)
-			tt.ss.flush()
+			srv, ss, w := createServerAndSessionWithInput(tt.cfg, tt.state, tt.input)
+
+			got, err := srv.auth_getln(ss)
+			ss.Flush()
+
 			if got != tt.want {
 				t.Errorf("Smtpd.auth_gets() got = %v, want %v", got, tt.want)
 			}
@@ -138,8 +133,8 @@ func TestSmtpd_auth_login(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		d         *Config
-		ss        *Session
+		cfg       *Config
+		state     sessionState
 		args      args
 		input     string
 		want      authAttributes
@@ -149,7 +144,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"<empty>",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{
@@ -162,7 +157,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"no username1",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{},
@@ -172,7 +167,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"no username2",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{},
@@ -182,7 +177,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"no password",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\n\r\n",
 			authAttributes{
@@ -194,7 +189,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"vasya@pupkin.org",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			authAttributes{
@@ -207,7 +202,7 @@ func TestSmtpd_auth_login(t *testing.T) {
 		{
 			"abort",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"*\r\n",
 			authAttributes{},
@@ -218,13 +213,10 @@ func TestSmtpd_auth_login(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := &bytes.Buffer{}
-			d := &Smtpd{tt.d}
-			tt.ss.ssout = bufio.NewWriter(w)
-			tt.ss.ssin = bufio.NewReader(strings.NewReader(tt.input))
+			srv, ss, w := createServerAndSessionWithInput(tt.cfg, tt.state, tt.input)
 
-			got, err := d.auth_login(tt.ss, tt.args.arg)
-			tt.ss.flush()
+			got, err := srv.auth_login(ss, tt.args.arg)
+			ss.Flush()
 
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)
@@ -247,8 +239,8 @@ func TestSmtpd_auth_plain(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		d         *Config
-		ss        *Session
+		cfg       *Config
+		state     sessionState
 		args      args
 		input     string
 		want      authAttributes
@@ -258,7 +250,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		{
 			"<empty>",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{
@@ -271,7 +263,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		{
 			"argument",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA"},
 			"",
 			authAttributes{
@@ -284,7 +276,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		{
 			"empty argument (=)",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{"="},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{},
@@ -294,7 +286,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		{
 			"no response",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"\r\n",
 			authAttributes{},
@@ -304,7 +296,7 @@ func TestSmtpd_auth_plain(t *testing.T) {
 		{
 			"abort",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"*\r\n",
 			authAttributes{},
@@ -315,13 +307,10 @@ func TestSmtpd_auth_plain(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := &bytes.Buffer{}
-			d := &Smtpd{tt.d}
-			tt.ss.ssout = bufio.NewWriter(w)
-			tt.ss.ssin = bufio.NewReader(strings.NewReader(tt.input))
+			srv, ss, w := createServerAndSessionWithInput(tt.cfg, tt.state, tt.input)
 
-			got, err := d.auth_plain(tt.ss, tt.args.arg)
-			tt.ss.flush()
+			got, err := srv.auth_plain(ss, tt.args.arg)
+			ss.Flush()
 
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)
@@ -344,8 +333,8 @@ func TestSmtpd_auth_cram(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		d         *Config
-		ss        *Session
+		cfg       *Config
+		state     sessionState
 		args      args
 		input     string
 		want      authAttributes
@@ -355,7 +344,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		{
 			"<empty>",
 			&Config{Hostname: "mx.pupkin.org"},
-			&Session{},
+			sessionState{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZyBhNGZlYTY2YjJhYjA4ZjEyZGI5OTYyMTlmZTc3YTM1Yw==\r\n",
 			authAttributes{
@@ -369,7 +358,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		{
 			"empty argument (=)",
 			&Config{Hostname: "mx.pupkin.org"},
-			&Session{},
+			sessionState{},
 			args{"="},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQA\r\n",
 			authAttributes{},
@@ -379,7 +368,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		{
 			"no response",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"\r\n",
 			authAttributes{},
@@ -389,7 +378,7 @@ func TestSmtpd_auth_cram(t *testing.T) {
 		{
 			"abort",
 			&Config{},
-			&Session{},
+			sessionState{},
 			args{""},
 			"*\r\n",
 			authAttributes{},
@@ -408,13 +397,10 @@ func TestSmtpd_auth_cram(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := &bytes.Buffer{}
-			d := &Smtpd{tt.d}
-			tt.ss.ssout = bufio.NewWriter(w)
-			tt.ss.ssin = bufio.NewReader(strings.NewReader(tt.input))
+			srv, ss, w := createServerAndSessionWithInput(tt.cfg, tt.state, tt.input)
 
-			got, err := d.auth_cram(tt.ss, tt.args.arg)
-			tt.ss.flush()
+			got, err := srv.auth_cram(ss, tt.args.arg)
+			ss.Flush()
 
 			if err == nil && !attributesIsEqual(got, tt.want) {
 				t.Errorf("Smtpd.auth_login() got = %v, want %v", got, tt.want)

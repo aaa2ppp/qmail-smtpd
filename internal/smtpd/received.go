@@ -70,6 +70,6 @@ func received(
 	qqt.Puts(protocol)
 	qqt.Puts("; ")
 	dt := time.Now()
-	qqt.Puts(dt.Format(time.RFC822Z))
+	qqt.Puts(dt.Format("2 Jan 2006 15:04:05 -0700"))
 	qqt.Putc('\n')
 }

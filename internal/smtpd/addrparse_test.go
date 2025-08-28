@@ -1,9 +1,10 @@
 package smtpd
 
 import (
-	"qmail-smtpd/internal/scan"
 	"strings"
 	"testing"
+
+	"qmail-smtpd/internal/scan"
 )
 
 func Test_addrparse(t *testing.T) {

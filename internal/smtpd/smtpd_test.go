@@ -1,103 +1,17 @@
 package smtpd
 
 import (
-	"errors"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
-
-	"qmail-smtpd/internal/conn"
-	"qmail-smtpd/internal/scan"
-)
-
-type alwaysAuth struct{}
-
-func (a alwaysAuth) Authenticate(_, _, _ string) bool { return true }
-
-type alwaysNoAuth struct{}
-
-func (a alwaysNoAuth) Auth(_, _, _ string) bool { return false }
-
-type alwaysMatch struct{}
-
-func (m alwaysMatch) Match(_ string) bool { return true }
-
-type alwaysNotMatch struct{}
-
-func (m alwaysNotMatch) Match(_ string) bool { return false }
-
-type fakeReader struct {
-	*strings.Reader
-	timeout   time.Duration
-	deadline  time.Time
-	alwaysErr bool
-}
-
-func newFakeReader(s string) *fakeReader { return &fakeReader{Reader: strings.NewReader(s)} }
-func newFakeReaderTimeout(s string, timeout time.Duration) *fakeReader {
-	r := newFakeReader(s)
-	r.timeout = timeout
-	return r
-}
-func newReaderAlwaysErr() *fakeReader                   { return &fakeReader{alwaysErr: true} }
-func (r *fakeReader) SetReadDeadline(t time.Time) error { r.deadline = t; return nil }
-func (r *fakeReader) Close() error                      { return nil }
-func (r *fakeReader) Read(b []byte) (int, error) {
-	if r.alwaysErr {
-		return 0, errors.New("read error")
-	}
-	if !r.deadline.Equal(time.Time{}) && r.deadline.Before(time.Now().Add(r.timeout)) {
-		time.Sleep(r.timeout)
-		return 0, os.ErrDeadlineExceeded
-	}
-	return r.Reader.Read(b)
-}
-
-type fakeWriter struct {
-	buf      strings.Builder
-	timeout  time.Duration
-	deadline time.Time
-}
-
-func (w *fakeWriter) SetWriteDeadline(t time.Time) error { w.deadline = t; return nil }
-func (r *fakeWriter) Close() error                       { return nil }
-func (w *fakeWriter) Write(b []byte) (int, error) {
-	if !w.deadline.Equal(time.Time{}) && w.deadline.Before(time.Now().Add(w.timeout)) {
-		time.Sleep(w.timeout)
-		return 0, os.ErrDeadlineExceeded
-	}
-	return w.buf.Write(b)
-}
-
-type qmailQueue struct {
-	result string
-}
-
-func (qq *qmailQueue) Open(env []string) (QmailQueue, error) {
-	return qq, nil
-}
-
-func (qq *qmailQueue) Pid() int      { return 7777 }
-func (qq *qmailQueue) Putc(_ byte)   {}
-func (qq *qmailQueue) Puts(_ string) {}
-func (qq *qmailQueue) From(_ string) {}
-func (qq *qmailQueue) To(_ string)   {}
-func (qq *qmailQueue) Fail()         { qq.result = "D*** Fail() called ***" }
-func (qq *qmailQueue) Close() string { return qq.result }
-
-var (
-	_ Qmail      = (*qmailQueue)(nil)
-	_ QmailQueue = (*qmailQueue)(nil)
 )
 
 func TestSmtpd_Run(t *testing.T) {
 	tests := []struct {
 		name    string
-		d       *Config
-		ss      *Session
-		r       conn.Reader
+		cfg     *Config
+		state   sessionState
+		r       *fakeReader
 		w       *fakeWriter
 		want    []int
 		wantErr bool
@@ -105,7 +19,7 @@ func TestSmtpd_Run(t *testing.T) {
 		{
 			"all commands",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader(`nonexistent
 starttls
 help
@@ -127,7 +41,7 @@ quit
 		{
 			"rcpthost",
 			&Config{RcptHosts: alwaysMatch{}},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -136,7 +50,7 @@ quit
 		{
 			"!rcpthost",
 			&Config{RcptHosts: alwaysNotMatch{}},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -145,7 +59,7 @@ quit
 		{
 			"relayclient",
 			&Config{RcptHosts: alwaysNotMatch{}, RelayClientOk: true},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -154,7 +68,7 @@ quit
 		{
 			"badmailfrom",
 			&Config{BadMailFrom: alwaysMatch{}},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -163,7 +77,7 @@ quit
 		{
 			"!badmailfrom",
 			&Config{BadMailFrom: alwaysNotMatch{}},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -172,7 +86,7 @@ quit
 		{
 			"badmailfrom & rcpthost",
 			&Config{BadMailFrom: alwaysMatch{}, RcptHosts: alwaysMatch{}},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 553, 221},
@@ -181,8 +95,8 @@ quit
 		{
 			"read timeout",
 			&Config{Timeout: 10 * time.Millisecond},
-			&Session{},
-			newFakeReaderTimeout("quit\n", 100*time.Millisecond),
+			sessionState{},
+			newFakeReaderWithTimeout("quit\n", 100*time.Millisecond),
 			&fakeWriter{},
 			[]int{220, 451},
 			true,
@@ -190,8 +104,8 @@ quit
 		{
 			"read error",
 			&Config{Timeout: 10 * time.Millisecond},
-			&Session{},
-			newReaderAlwaysErr(),
+			sessionState{},
+			newFakeReaderAlwaysErr(),
 			&fakeWriter{},
 			[]int{220},
 			true,
@@ -199,7 +113,7 @@ quit
 		{
 			"write timeout",
 			&Config{Timeout: 10 * time.Millisecond},
-			&Session{},
+			sessionState{},
 			newFakeReader("quit\n"),
 			&fakeWriter{timeout: 100 * time.Millisecond},
 			[]int{},
@@ -208,7 +122,7 @@ quit
 		{
 			"mail from:<> first",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -217,7 +131,7 @@ quit
 		{
 			"mail from:<> first 2",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\ndata\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -226,7 +140,7 @@ quit
 		{
 			"rcpt to:<> first",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\ndata\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 503, 221},
@@ -235,7 +149,7 @@ quit
 		{
 			"mail syntax error",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 555, 221},
@@ -244,7 +158,7 @@ quit
 		{
 			"rcpt syntax error",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("helo\nmail from:<>\nrcpt\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 555, 221},
@@ -253,7 +167,7 @@ quit
 		{
 			"no auth",
 			&Config{},
-			&Session{},
+			sessionState{},
 			newFakeReader("ehlo\nauth\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 503, 221},
@@ -262,7 +176,7 @@ quit
 		{
 			"auth login - oops! need starttls",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{},
+			sessionState{},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
 quit
@@ -274,7 +188,7 @@ quit
 		{
 			"auth login - ok",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
 bXkgc3Ryb25nIHBhc3N3b3JkCg==
@@ -287,7 +201,7 @@ quit
 		{
 			"auth login - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login vasya@pupkin.org
 quit
@@ -299,7 +213,7 @@ quit
 		{
 			"auth login2 - ok",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 dmFzeWFAcHVwa2luLm9yZwo=
@@ -313,7 +227,7 @@ quit
 		{
 			"auth login2 - ok",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 dmFzeWFAcHVwa2luLm9yZwo=
@@ -327,7 +241,7 @@ quit
 		{
 			"auth login2 - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
 vasya@pupkin.org
@@ -340,7 +254,7 @@ quit
 		{
 			"auth plain - oops! need starttls",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{},
+			sessionState{},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
 quit
@@ -352,7 +266,7 @@ quit
 		{
 			"auth plain - ok",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
 quit
@@ -364,7 +278,7 @@ quit
 		{
 			"auth plain - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
 quit
@@ -376,7 +290,7 @@ quit
 		{
 			"auth plain2 - ok",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 
 MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
@@ -389,7 +303,7 @@ quit
 		{
 			"auth plain2 - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{tlsEnabled: true},
+			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain
 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
@@ -402,7 +316,7 @@ quit
 		{
 			"auth cram-md5 - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{},
+			sessionState{},
 			newFakeReader(`ehlo
 auth cram-md5
 dmFzeWFAcHVwa2luLm9yZyBhNGZlYTY2YjJhYjA4ZjEyZGI5OTYyMTlmZTc3YTM1Yw==
@@ -415,7 +329,7 @@ quit
 		{
 			"auth cram-md5 - oops! need base64 encoding",
 			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
-			&Session{},
+			sessionState{},
 			newFakeReader(`ehlo
 auth cram-md5
 vasya@pupkin.org a4fea66b2ab08f12db996219fe77a35c
@@ -431,9 +345,9 @@ quit
 				LocalHost:  "mx.pupkin.org",
 				RemoteIP:   "192.168.69.69",
 				RemoteHost: "vasya.pupkin.org",
-				Qmail:      &qmailQueue{},
+				Qmail:      &fakeQueue{},
 			},
-			&Session{},
+			sessionState{},
 			newFakeReader(addCr(`helo localhost
 mail from:<vasya@pupkin.org>
 rcpt to:<masha@pupkin.org>
@@ -454,9 +368,9 @@ quit
 				LocalHost:  "mx.pupkin.org",
 				RemoteIP:   "192.168.69.69",
 				RemoteHost: "vasya.pupkin.org",
-				Qmail:      &qmailQueue{},
+				Qmail:      &fakeQueue{},
 			},
-			&Session{},
+			sessionState{},
 			newFakeReader(delCr(`helo localhost
 mail from:<vasya@pupkin.org>
 rcpt to:<masha@pupkin.org>
@@ -473,63 +387,28 @@ quit
 		},
 		// TODO: Add test cases.
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var showed bool
-			conn := &conn.Conn{Reader: tt.r, Writer: tt.w}
-			d := &Smtpd{tt.d}
-			d.initSession(tt.ss, conn)
+			srv, ss := createServerAndSessionWithRW(tt.cfg, tt.state, tt.r, tt.w)
+			alreadyShowed := false
 
-			if err := d.run(tt.ss); (err != nil) != tt.wantErr {
-				if !showed {
-					t.Logf("\nSmtpd.Run() = %s", tt.w.buf.String())
-					showed = true
+			if err := srv.run(ss); (err != nil) != tt.wantErr {
+				if !alreadyShowed {
+					t.Logf("\nSmtpd.Run() = %s", tt.w.String())
+					alreadyShowed = true
 				}
 				t.Errorf("\nSmtpd.Run() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			got := extractCodes(tt.w.buf.String())
+
+			got := extractCodes(tt.w.String())
 			if tt.w.timeout == 0 && !reflect.DeepEqual(got, tt.want) {
-				if !showed {
-					t.Logf("\nSmtpd.Run() = %s", tt.w.buf.String())
-					showed = true
+				if !alreadyShowed {
+					t.Logf("\nSmtpd.Run() = %s", tt.w.String())
+					alreadyShowed = true
 				}
 				t.Errorf("\nSmtpd.Run() = %v, \nwant %v", got, tt.want)
 			}
 		})
 	}
-}
-
-func extractCodes(answers string) []int {
-	crln := "\r\n"
-	answers = strings.TrimSuffix(answers, crln)
-	lines := strings.Split(answers, crln)
-	codes := make([]int, 0, len(lines))
-	for _, line := range lines {
-		j, code := scan.ScanUlong(line)
-		if j < len(line) && line[j] == '-' {
-			continue
-		}
-		codes = append(codes, int(code))
-	}
-	return codes
-}
-
-func addCr(s string) string {
-	a := strings.Split(s, "\n")
-	for i := range a {
-		if n := len(a[i]); n > 0 && a[i][n-1] == '\r' {
-			a[i] = a[i][:n-1]
-		}
-	}
-	return strings.Join(a, "\r\n")
-}
-
-func delCr(s string) string {
-	a := strings.Split(s, "\n")
-	for i := range a {
-		if n := len(a[i]); n > 0 && a[i][n-1] == '\r' {
-			a[i] = a[i][:n-1]
-		}
-	}
-	return strings.Join(a, "\n")
 }

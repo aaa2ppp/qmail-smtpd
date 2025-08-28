@@ -19,21 +19,21 @@ type authAttributes struct {
 	resp string
 }
 
-func (d *Smtpd) auth_err_input(ss *Session) error {
+func (d *Server) auth_err_input(ss *session) error {
 	return ss.out("501 malformed auth input (#5.5.4)\r\n")
 }
 
-func (d *Smtpd) auth_prompt(ss *Session, prompt string) error {
+func (d *Server) auth_prompt(ss *session, prompt string) error {
 	_ = ss.out("334 ")
 	_ = ss.out(b64encode(prompt))
 	_ = ss.out("\r\n")
-	return ss.flush()
+	return ss.Flush()
 }
 
 var ErrAuthFailed = errors.New("auth failed")
 
-func (d *Smtpd) auth_getln(ss *Session) (string, error) {
-	s, err := ss.getln()
+func (d *Server) auth_getln(ss *session) (string, error) {
+	s, err := ss.ReadLine()
 	if err != nil {
 		return "", err
 	}
@@ -43,7 +43,7 @@ func (d *Smtpd) auth_getln(ss *Session) (string, error) {
 	return d.auth_decode(ss, s)
 }
 
-func (d *Smtpd) auth_decode(ss *Session, s string) (string, error) {
+func (d *Server) auth_decode(ss *session, s string) (string, error) {
 	var ok bool
 	s, ok = b64decode(s)
 	if !ok {
@@ -52,7 +52,7 @@ func (d *Smtpd) auth_decode(ss *Session, s string) (string, error) {
 	return s, nil
 }
 
-func (d *Smtpd) auth_login(ss *Session, arg string) (authAttributes, error) {
+func (d *Server) auth_login(ss *session, arg string) (authAttributes, error) {
 	var (
 		aa  authAttributes
 		err error
@@ -83,7 +83,7 @@ func (d *Smtpd) auth_login(ss *Session, arg string) (authAttributes, error) {
 	return aa, nil
 }
 
-func (d *Smtpd) auth_plain(ss *Session, arg string) (authAttributes, error) {
+func (d *Server) auth_plain(ss *session, arg string) (authAttributes, error) {
 	var (
 		aa   authAttributes
 		slop string
@@ -142,7 +142,7 @@ func cram_request(hostname string) string {
 	return buf.String()
 }
 
-func (d *Smtpd) auth_cram(ss *Session, arg string) (authAttributes, error) {
+func (d *Server) auth_cram(ss *session, arg string) (authAttributes, error) {
 	var (
 		aa   authAttributes
 		slop string
@@ -180,7 +180,7 @@ func (d *Smtpd) auth_cram(ss *Session, arg string) (authAttributes, error) {
 	return aa, nil
 }
 
-func (d *Smtpd) smtp_auth(ss *Session, arg string) error {
+func (d *Server) smtp_auth(ss *session, arg string) error {
 	if d.cfg.Auth == nil || d.cfg.Hostname == "" {
 		return ss.out("503 auth not available (#5.3.3)\r\n")
 	}
@@ -202,7 +202,7 @@ func (d *Smtpd) smtp_auth(ss *Session, arg string) error {
 		arg = arg[1:]
 	}
 
-	var authFn func(ss *Session, arg string) (authAttributes, error)
+	var authFn func(ss *session, arg string) (authAttributes, error)
 	switch strings.ToLower(cmd) {
 	case "login":
 		if !ss.tlsEnabled {
@@ -236,14 +236,14 @@ func (d *Smtpd) smtp_auth(ss *Session, arg string) error {
 	return ss.out("235 ok, go ahead (#2.0.0)\r\n")
 }
 
-func (d *Smtpd) setAuthorized(ss *Session, user string) {
+func (d *Server) setAuthorized(ss *session, user string) {
 	ss.authorized = true
 	ss.remoteInfo = user
 	ss.relayClient = ""
 	ss.relayClientOk = true
 }
 
-func (d *Smtpd) resetAuthorized(ss *Session) {
+func (d *Server) resetAuthorized(ss *session) {
 	ss.authorized = false
 	ss.remoteInfo = ""
 	ss.relayClient = d.cfg.RelayClient

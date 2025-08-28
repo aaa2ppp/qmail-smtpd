@@ -1,47 +1,26 @@
 package smtpd
 
 import (
-	"bufio"
 	"cmp"
 	"crypto/tls"
 	"errors"
-	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/smtpd/interfaces"
+	"qmail-smtpd/internal/smtpd/safeio"
 )
 
-type AddrMatcher interface {
-	Match(string) bool
-}
-
-type IPMe interface {
-	Is(scan.IPAddress) bool
-}
-
-type Qmail interface {
-	Open(env []string) (QmailQueue, error)
-}
-
-type LogWriter interface { // XXX
-	io.StringWriter
-	Flush() error
-	WithPrefix(string) LogWriter
-}
-
-type QmailQueue interface {
-	Pid() int
-	Putc(byte)
-	Puts(string)
-	From(string)
-	To(string)
-	Fail()
-	Close() string
-}
+type (
+	AddrMatcher = interfaces.AddrMatcher
+	IPMe        = interfaces.IPMe
+	Qmail       = interfaces.Qmail
+	QmailQueue  = interfaces.QmailQueue
+	LogWriter   = interfaces.LogWriter
+)
 
 const (
 	MaxHops        = 100
@@ -69,10 +48,10 @@ type Config struct {
 	Hostname      string
 	Auth          Authenticator
 	TLSConfig     *tls.Config
-	Log           LogWriter
+	Logger        LogWriter
 }
 
-type Session struct {
+type sessionState struct {
 	// remoteInfo contains the authenticated username in the same way as in qmail-smtpd with auth patch.
 	// It set only after successful AUTH and is never set externally. Before calling `qmail-queue`,
 	// the TCPREMOTEINFO environment variable will be set from it.
@@ -81,113 +60,87 @@ type Session struct {
 	relayClient   string
 	relayClientOk bool
 
-	conn  net.Conn
-	ssin  *bufio.Reader
-	ssout *bufio.Writer
-
-	login  LogWriter
-	logout LogWriter
-
 	helohost        string
 	fakehelo        string /* pointer into helohost, or 0 */
 	seenmail        bool
 	flagbarf        bool /* defined if seenmail */
 	mailfrom        string
 	rcptto          []string
-	bytestooverflow uint
 	qqt             QmailQueue
 	authorized      bool
 	tlsEnabled      bool
 }
 
-type Smtpd struct {
-	cfg *Config
+type session struct {
+	*safeio.SafeIO
+	sessionState
 }
 
-func New(cfg *Config) *Smtpd {
-	return &Smtpd{cfg}
-}
-
-func (ss *Session) flush() error {
-	if ss.logout != nil {
-		ss.logout.Flush()
-	}
-	return ss.ssout.Flush()
-}
-
-func (ss *Session) out(s string) error {
-	if ss.logout != nil {
-		ss.logout.WriteString(s)
-	}
-	_, err := ss.ssout.WriteString(s)
+func (ss *session) out(s string) error {
+	_, err := ss.WriteString(s)
 	return err
 }
 
-func (ss *Session) getln() (string, error) {
-	s, err := ss.ssin.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	if ss.login != nil {
-		ss.login.WriteString(s)
-		ss.login.Flush()
-	}
-	s = s[:len(s)-1]
-	if s[len(s)-1] == '\r' {
-		s = s[:len(s)-1]
-	}
-	return s, nil
+type Server struct {
+	cfg      *Config
+	cmdTable map[string]command
 }
 
-func (d *Smtpd) err_bmf(ss *Session) error {
+func NewServer(cfg *Config) *Server {
+	d := &Server{cfg: cfg}
+	d.cmdTable = newCommandTable(d)
+	return d
+}
+
+func (d *Server) err_bmf(ss *session) error {
 	return ss.out("553 sorry, your envelope sender is in my badmailfrom list (#5.7.1)\r\n")
 }
-func (d *Smtpd) err_nogateway(ss *Session) error {
+func (d *Server) err_nogateway(ss *session) error {
 	return ss.out("553 sorry, that domain isn't in my list of allowed rcpthosts (#5.7.1)\r\n")
 }
-func (d *Smtpd) err_unimpl(ss *Session, _ string) error {
+func (d *Server) err_unimpl(ss *session, _ string) error {
 	return ss.out("502 unimplemented (#5.5.1)\r\n")
 }
-func (d *Smtpd) err_syntax(ss *Session) error         { return ss.out("555 syntax error (#5.5.4)\r\n") }
-func (d *Smtpd) err_wantmail(ss *Session) error       { return ss.out("503 MAIL first (#5.5.1)\r\n") }
-func (d *Smtpd) err_wantrcpt(ss *Session) error       { return ss.out("503 RCPT first (#5.5.1)\r\n") }
-func (d *Smtpd) err_noop(ss *Session, _ string) error { return ss.out("250 ok\r\n") }
-func (d *Smtpd) err_vrfy(ss *Session, _ string) error {
+func (d *Server) err_syntax(ss *session) error         { return ss.out("555 syntax error (#5.5.4)\r\n") }
+func (d *Server) err_wantmail(ss *session) error       { return ss.out("503 MAIL first (#5.5.1)\r\n") }
+func (d *Server) err_wantrcpt(ss *session) error       { return ss.out("503 RCPT first (#5.5.1)\r\n") }
+func (d *Server) err_noop(ss *session, _ string) error { return ss.out("250 ok\r\n") }
+func (d *Server) err_vrfy(ss *session, _ string) error {
 	return ss.out("252 send some mail, i'll try my best\r\n")
 }
-func (d *Smtpd) err_qqt(ss *Session) error     { return ss.out("451 qqt failure (#4.3.0)\r\n") }
-func (d *Smtpd) err_timeout(ss *Session) error { return ss.out("451 timeout (#4.4.2)\r\n") }
+func (d *Server) err_qqt(ss *session) error     { return ss.out("451 qqt failure (#4.3.0)\r\n") }
+func (d *Server) err_timeout(ss *session) error { return ss.out("451 timeout (#4.4.2)\r\n") }
 
-func (d *Smtpd) smtp_greet(ss *Session, code string) error {
+func (d *Server) smtp_greet(ss *session, code string) error {
 	_ = ss.out(code)
 	return ss.out(d.cfg.Greeting)
 }
 
-func (d *Smtpd) smtp_help(ss *Session, _ string) error {
+func (d *Server) smtp_help(ss *session, _ string) error {
 	return ss.out("214 qmail home page: http://pobox.com/~djb/qmail.html\r\n")
 }
 
-func (d *Smtpd) smtp_quit(ss *Session, _ string) error {
+func (d *Server) smtp_quit(ss *session, _ string) error {
 	_ = d.smtp_greet(ss, "221 ")
 	_ = ss.out("\r\n")
-	return cmp.Or(ss.flush(), ErrClientQuit)
+	return cmp.Or(ss.Flush(), ErrClientQuit)
 }
 
-func (d *Smtpd) dohelo(ss *Session, arg string) {
+func (d *Server) dohelo(ss *session, arg string) {
 	ss.helohost = arg
 	if !strings.EqualFold(d.cfg.RemoteHost, ss.helohost) {
 		ss.fakehelo = ss.helohost
 	}
 }
 
-func (d *Smtpd) smtp_helo(ss *Session, arg string) error {
+func (d *Server) smtp_helo(ss *session, arg string) error {
 	ss.seenmail = false
 	d.dohelo(ss, arg)
 	_ = d.smtp_greet(ss, "250 ")
 	return ss.out("\r\n")
 }
 
-func (d *Smtpd) smtp_ehlo(ss *Session, arg string) error {
+func (d *Server) smtp_ehlo(ss *session, arg string) error {
 	ss.seenmail = false
 	d.dohelo(ss, arg)
 	_ = d.smtp_greet(ss, "250-")
@@ -211,12 +164,12 @@ func (d *Smtpd) smtp_ehlo(ss *Session, arg string) error {
 	return ss.out("\r\n250 8BITMIME\r\n")
 }
 
-func (d *Smtpd) smtp_rset(ss *Session, args string) error {
+func (d *Server) smtp_rset(ss *session, args string) error {
 	ss.seenmail = false
 	return ss.out("250 flushed\r\n")
 }
 
-func (d *Smtpd) smtp_mail(ss *Session, arg string) error {
+func (d *Server) smtp_mail(ss *session, arg string) error {
 	addr, ok := addrparse(arg)
 	if !ok {
 		return d.err_syntax(ss)
@@ -232,7 +185,7 @@ func (d *Smtpd) smtp_mail(ss *Session, arg string) error {
 	return ss.out("250 ok\r\n")
 }
 
-func (d *Smtpd) smtp_rcpt(ss *Session, arg string) error {
+func (d *Server) smtp_rcpt(ss *session, arg string) error {
 	if !ss.seenmail {
 		return d.err_wantmail(ss)
 	}
@@ -261,7 +214,7 @@ func (d *Smtpd) smtp_rcpt(ss *Session, arg string) error {
 	return ss.out("250 ok\r\n")
 }
 
-func (d *Smtpd) acceptmessage(ss *Session, qp int) error {
+func (d *Server) acceptmessage(ss *session, qp int) error {
 	when := time.Now()
 	_ = ss.out("250 ok ")
 	_ = ss.out(strconv.Itoa(int(when.Unix())))
@@ -270,7 +223,7 @@ func (d *Smtpd) acceptmessage(ss *Session, qp int) error {
 	return ss.out("\r\n")
 }
 
-func (d *Smtpd) prepareQmailEnv(ss *Session) []string {
+func (d *Server) prepareQmailEnv(ss *session) []string {
 	env := []string{
 		"TCPREMOTEIP=" + d.cfg.RemoteIP,
 		"TCPREMOTEHOST=" + d.cfg.RemoteHost,
@@ -289,7 +242,7 @@ func (d *Smtpd) prepareQmailEnv(ss *Session) []string {
 	return env
 }
 
-func (d *Smtpd) smtp_data(ss *Session, _ string) error {
+func (d *Server) smtp_data(ss *session, _ string) error {
 	if !ss.seenmail {
 		return d.err_wantmail(ss)
 	}
@@ -310,10 +263,7 @@ func (d *Smtpd) smtp_data(ss *Session, _ string) error {
 
 	received(ss.qqt, "SMTP", d.cfg.LocalHost, d.cfg.RemoteIP, d.cfg.RemoteHost, ss.remoteInfo, ss.fakehelo)
 
-	if d.cfg.Databytes != 0 {
-		ss.bytestooverflow = uint(d.cfg.Databytes) + 1
-	}
-	hops, err := d.blast(ss)
+	hops, overflow, err := d.blast(ss, d.cfg.Databytes)
 	if err != nil {
 		return err
 	}
@@ -338,7 +288,7 @@ func (d *Smtpd) smtp_data(ss *Session, _ string) error {
 	if too_many_hops {
 		return ss.out("554 too many hops, this message is looping (#5.4.6)\r\n")
 	}
-	if d.cfg.Databytes != 0 && ss.bytestooverflow == 0 {
+	if d.cfg.Databytes > 0 && overflow == 0 {
 		return ss.out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
 	}
 
@@ -351,16 +301,18 @@ func (d *Smtpd) smtp_data(ss *Session, _ string) error {
 	return ss.out("\r\n")
 }
 
-type handlerFunc = func(ss *Session, arg string) error
+type handlerFunc = func(ss *session, arg string) error
 
 type command struct {
 	handler   handlerFunc
 	needFlush bool
 }
 
-const unimpl = "unimpl"
+type commandTable map[string]command
 
-func (d *Smtpd) createCommadsTable() map[string]command {
+const unimpl = "*unimpl*"
+
+func newCommandTable(d *Server) commandTable {
 	return map[string]command{
 		"rcpt":     {d.smtp_rcpt, false},
 		"mail":     {d.smtp_mail, false},
@@ -378,39 +330,36 @@ func (d *Smtpd) createCommadsTable() map[string]command {
 	}
 }
 
-// XXX
-func (d *Smtpd) initSession(ss *Session, conn net.Conn) {
-	ss.relayClient = d.cfg.RelayClient
-	ss.relayClientOk = d.cfg.RelayClientOk
-
-	if d.cfg.Log != nil {
-		ss.login = d.cfg.Log.WithPrefix("=> ")
-		ss.logout = d.cfg.Log.WithPrefix("<= ")
+func (d *Server) newSession(conn net.Conn) *session {
+	return &session{
+		SafeIO: safeio.New(conn, d.cfg.Logger, d.cfg.Timeout),
+		sessionState: sessionState{
+			relayClient:   d.cfg.RelayClient,
+			relayClientOk: d.cfg.RelayClientOk,
+		},
 	}
-
-	d.initIO(ss, conn)
 }
 
-func (d *Smtpd) run(ss *Session) error {
+func (d *Server) run(ss *session) error {
 	d.dohelo(ss, d.cfg.RemoteHost)
-
 	d.smtp_greet(ss, "220 ")
 	ss.out(" ESMTP\r\n")
 
-	ct := d.createCommadsTable()
-	if err := d.commands(ss, ct); err != nil && err != ErrClientQuit {
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			d.err_timeout(ss)
-			ss.flush()
-		}
-		return err
+	err := d.commandLoop(ss) // always return error
+
+	if err == ErrClientQuit {
+		return nil
 	}
 
-	return nil
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		d.err_timeout(ss)
+		ss.Flush()
+	}
+
+	return err
 }
 
-func (d *Smtpd) Run(conn net.Conn) error {
-	var ss Session
-	d.initSession(&ss, conn)
-	return d.run(&ss)
+func (d *Server) Run(conn net.Conn) error {
+	ss := d.newSession(conn)
+	return d.run(ss)
 }

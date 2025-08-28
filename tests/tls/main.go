@@ -159,7 +159,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("LoadX509KeyPair: %v", err)
 	}
-	
+
 	cfg := &smtpd.Config{
 		Greeting:   "localhost",
 		LocalIP:    "127.0.0.1",
@@ -170,12 +170,12 @@ func main() {
 		TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}},
 	}
 	if _, ok := os.LookupEnv("SMTPLOG"); ok {
-		cfg.Log = &logAdapter{log1.Writer{
+		cfg.Logger = &logAdapter{log1.Writer{
 			Out: os.Stderr,
 		}}
 	}
 
-	serv := smtpd.New(cfg)
+	serv := smtpd.NewServer(cfg)
 
 	done := make(chan struct{})
 	go func() {

@@ -90,7 +90,7 @@ func main() {
 		d.Auth = authAdapter{childargs: os.Args[2:]}
 	}
 
-	srv := smtpd.New(d)
+	srv := smtpd.NewServer(d)
 
 	c := &conn.Conn{
 		Reader:   os.Stdin,
@@ -229,7 +229,7 @@ func prepareConfig() *smtpd.Config {
 	}
 	if logEnable {
 		pid := os.Getpid()
-		d.Log = &logAdapter{log1.Writer{
+		d.Logger = &logAdapter{log1.Writer{
 			Out:    os.Stderr,
 			Prefix: fmt.Sprintf("smtp-log[%d]: %s: ", pid, d.RemoteIP),
 		}}

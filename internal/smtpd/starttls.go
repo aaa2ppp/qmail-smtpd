@@ -1,10 +1,6 @@
 package smtpd
 
-import (
-	"crypto/tls"
-)
-
-func (d *Smtpd) smtp_tls(ss *Session,arg string) error {
+func (d *Server) smtp_tls(ss *session, arg string) error {
 	if d.cfg.TLSConfig == nil {
 		return d.err_unimpl(ss, "") // или 454 TLS not available
 	}
@@ -22,18 +18,15 @@ func (d *Smtpd) smtp_tls(ss *Session,arg string) error {
 	}
 
 	_ = ss.out("220 Ready to start TLS\r\n")
-	if err := ss.flush(); err != nil {
+	if err := ss.StartTLS(d.cfg.TLSConfig); err != nil {
 		return err
 	}
-
-	conn := tls.Server(ss.conn, d.cfg.TLSConfig)
-	d.initIO(ss, conn)
 
 	ss.tlsEnabled = true
 	ss.seenmail = false
 	d.resetAuthorized(ss)
 
-	/* have to discard the pre-STARTTLS HELO/EHLO argument, if any */
+	// have to discard the pre-STARTTLS HELO/EHLO argument, if any
 	d.dohelo(ss, d.cfg.RemoteHost)
 
 	return nil

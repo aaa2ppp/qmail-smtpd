@@ -5,8 +5,9 @@ import (
 	"errors"
 )
 
+/*
 // TODO: развязать с Smtpd?
-func (d *Smtpd) put(ss *Session, ch byte) {
+func (d *Server) put(ss *session, ch byte) {
 	if ss.bytestooverflow != 0 {
 		ss.bytestooverflow--
 		if ss.bytestooverflow == 0 {
@@ -15,27 +16,43 @@ func (d *Smtpd) put(ss *Session, ch byte) {
 	}
 	ss.qqt.Putc(ch)
 }
+*/
 
 var ErrStrayNewLine = errors.New("stray new line")
 
-func (d *Smtpd) straynewline(ss *Session) error {
+func (d *Server) straynewline(ss *session) error {
 	ss.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
-	return cmp.Or(ss.flush(), ErrStrayNewLine)
+	return cmp.Or(ss.Flush(), ErrStrayNewLine)
 }
 
-func (d *Smtpd) blast(ss *Session) (int, error) {
-	hops := 0
-	state := 1
-	flaginheader := true
-	pos := 0           /* number of bytes since most recent \n, if fih */
-	flagmaybex := true /* 1 if this line might match RECEIVED, if fih */
-	flagmaybey := true /* 1 if this line might match \r\n, if fih */
-	flagmaybez := true /* 1 if this line might match DELIVERED, if fih */
+func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error) {
+	var (
+		state        = 1
+		flaginheader = true
+		pos          = 0    // number of bytes since most recent \n, if fih
+		flagmaybex   = true // 1 if this line might match RECEIVED, if fih
+		flagmaybey   = true // 1 if this line might match \r\n, if fih
+		flagmaybez   = true // 1 if this line might match DELIVERED, if fih
+	)
+
+	if limit > 0 {
+		overflow = limit + 1
+	}
+
+	put := func(ch byte) {
+		if overflow != 0 {
+			overflow--
+			if overflow == 0 {
+				ss.qqt.Fail()
+			}
+		}
+		ss.qqt.Putc(ch)
+	}
 
 	for {
-		ch, err := ss.ssin.ReadByte()
+		ch, err := ss.ReadByte()
 		if err != nil {
-			return hops, err
+			return hops, overflow, err
 		}
 
 		if flaginheader {
@@ -73,7 +90,7 @@ func (d *Smtpd) blast(ss *Session) (int, error) {
 		switch state {
 		case 0:
 			if ch == '\n' {
-				return hops, d.straynewline(ss)
+				return hops, overflow, d.straynewline(ss)
 			}
 			if ch == '\r' {
 				state = 4
@@ -81,7 +98,7 @@ func (d *Smtpd) blast(ss *Session) (int, error) {
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				return hops, d.straynewline(ss)
+				return hops, overflow, d.straynewline(ss)
 			}
 			if ch == '.' {
 				state = 2
@@ -94,7 +111,7 @@ func (d *Smtpd) blast(ss *Session) (int, error) {
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				return hops, d.straynewline(ss)
+				return hops, overflow, d.straynewline(ss)
 			}
 			if ch == '\r' {
 				state = 3
@@ -103,10 +120,10 @@ func (d *Smtpd) blast(ss *Session) (int, error) {
 			state = 0
 		case 3: /* \r\n + .\r */
 			if ch == '\n' {
-				return hops, nil
+				return hops, overflow, nil
 			}
-			d.put(ss, '.')
-			d.put(ss, '\r')
+			put('.')
+			put('\r')
 			if ch == '\r' {
 				state = 4
 				continue
@@ -118,11 +135,11 @@ func (d *Smtpd) blast(ss *Session) (int, error) {
 				break
 			}
 			if ch != '\r' {
-				d.put(ss, '\r')
+				put('\r')
 				state = 0
 			}
 		}
 
-		d.put(ss, ch)
+		put(ch)
 	}
 }

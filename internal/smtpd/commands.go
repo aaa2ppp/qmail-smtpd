@@ -12,17 +12,17 @@ func parseCmdLine(line string) (name, arg string) {
 	return strings.ToLower(line[:p]), strings.TrimSpace(line[p:])
 }
 
-func (d *Smtpd) commands(ss *Session, c map[string]command) error {
+func (d *Server) commandLoop(ss *session) error {
 	for {
-		line, err := ss.getln()
+		line, err := ss.ReadLine()
 		if err != nil {
 			return err
 		}
 
 		name, arg := parseCmdLine(line)
-		cmd, ok := c[name]
+		cmd, ok := d.cmdTable[name]
 		if !ok {
-			cmd = c[unimpl]
+			cmd = d.cmdTable[unimpl]
 		}
 
 		if err := cmd.handler(ss, arg); err != nil {
@@ -33,7 +33,7 @@ func (d *Smtpd) commands(ss *Session, c map[string]command) error {
 			continue
 		}
 
-		if err := ss.flush(); err != nil {
+		if err := ss.Flush(); err != nil {
 			return err
 		}
 	}
