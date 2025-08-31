@@ -1,4 +1,4 @@
-package conn
+package pipeconn
 
 import (
 	"errors"

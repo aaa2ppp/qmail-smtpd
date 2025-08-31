@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -11,13 +12,13 @@ import (
 
 	"qmail-smtpd/internal/auth"
 	"qmail-smtpd/internal/config"
-	"qmail-smtpd/internal/conn"
 	"qmail-smtpd/internal/control"
 	"qmail-smtpd/internal/control/badmailfrom"
 	"qmail-smtpd/internal/control/mbxhosts"
 	"qmail-smtpd/internal/control/rcpthosts"
 	"qmail-smtpd/internal/ipme"
 	log1 "qmail-smtpd/internal/log"
+	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/scan"
 	"qmail-smtpd/internal/smtpd"
@@ -25,8 +26,8 @@ import (
 
 type qmailAdapter struct{}
 
-func (qa qmailAdapter) Open(env []string) (smtpd.QmailQueue, error) {
-	return qmail.Open(env)
+func (qa qmailAdapter) Begin(fromMail string, rcptTo []string, env qmail.Env) (smtpd.Queue, error) {
+	return qmail.Begin(fromMail, rcptTo, env)
 }
 
 type rcpthostsAdapter struct{}
@@ -84,22 +85,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	d := prepareConfig()
+	cfg := prepareConfig()
 	if len(os.Args) > 1 {
-		d.Hostname = os.Args[1]
-		d.Auth = authAdapter{childargs: os.Args[2:]}
+		cfg.Hostname = os.Args[1]
+		cfg.Auth = authAdapter{childargs: os.Args[2:]}
 	}
 
-	srv := smtpd.NewServer(d)
+	srv := smtpd.NewServer(cfg)
 
-	c := &conn.Conn{
+	relayClient, relayClientOk := os.LookupEnv("RELAYCLIENT")
+	env := qmail.Env{
+		LocalIP:       cmp.Or(os.Getenv("TCPLOCALIP"), "unknown"),
+		LocalHost:     cmp.Or(os.Getenv("TCPLOCALHOST"), "unknown"),
+		RemoteIP:      cmp.Or(os.Getenv("TCPREMOTEIP"), "unknown"),
+		RemoteHost:    cmp.Or(os.Getenv("TCPREMOTEHOST"), "unknown"),
+		RemoteInfo:    "", // ignoring
+		RelayClient:   relayClient,
+		RelayClientOk: relayClientOk,
+	}
+
+	conn := &pipeconn.Conn{
 		Reader:   os.Stdin,
 		Writer:   os.Stdout,
-		LocalIP:  conn.Addr(d.LocalIP),
-		RemoteIP: conn.Addr(d.RemoteIP),
+		LocalIP:  pipeconn.Addr(env.LocalIP),
+		RemoteIP: pipeconn.Addr(env.RemoteIP),
 	}
 
-	if err := srv.Run(c); err != nil {
+	if err := srv.Run(conn, env); err != nil {
 		log.Fatalf("run failed: %v", err)
 	}
 }
@@ -115,7 +127,7 @@ func die_ipme() {
 }
 
 func prepareConfig() *smtpd.Config {
-	var d smtpd.Config
+	var cfg smtpd.Config
 
 	if control.Init() == -1 {
 		die_control()
@@ -124,47 +136,47 @@ func prepareConfig() *smtpd.Config {
 	if s, r := control.Rldef("control/smtpgreeting", true, ""); r != 1 {
 		die_control()
 	} else {
-		d.Greeting = s
+		cfg.Greeting = s
 	}
 
 	if s, r := control.Rldef("control/localiphost", true, ""); r == -1 {
 		die_control()
 	} else if r == 1 {
-		d.LocalIPHost = s
+		cfg.LocalIPHost = s
 	}
 
-	d.Timeout = smtpd.DefaultTimeout
+	cfg.Timeout = smtpd.DefaultTimeout
 	if i, r := control.ReadInt("control/timeoutsmtpd"); r == -1 {
 		die_control()
 	} else if r == 1 {
 		if i <= 0 {
 			i = 1
 		}
-		d.Timeout = time.Duration(i) * time.Second
+		cfg.Timeout = time.Duration(i) * time.Second
 	}
 
 	if r := rcpthosts.Init(); r == -1 {
 		die_control()
 	} else if r == 1 {
-		d.RcptHosts = rcpthostsAdapter{}
+		cfg.RcptHosts = rcpthostsAdapter{}
 	}
 
 	if r := badmailfrom.Init(); r == -1 {
 		die_control()
 	} else if r == 1 {
-		d.BadMailFrom = badmailfromAdapter{}
+		cfg.BadMailFrom = badmailfromAdapter{}
 	}
 
 	if r := mbxhosts.Init(); r == -1 {
 		die_control()
 	} else if r == 1 {
-		d.MbxHosts = mbxhostsAdapter{}
+		cfg.MbxHosts = mbxhostsAdapter{}
 	}
 
 	if i, r := control.ReadInt("control/databytes"); r == -1 {
 		die_control()
 	} else if r == 1 {
-		d.Databytes = i
+		cfg.Databytes = i
 	}
 
 	// x = env_get("DATABYTES");
@@ -173,49 +185,26 @@ func prepareConfig() *smtpd.Config {
 	if x := os.Getenv("DATABYTES"); x != "" {
 		_, u := scan.ScanUlong(x)
 		if u != 0 {
-			d.Databytes = int(u)
+			cfg.Databytes = int(u)
 		}
 	}
-	if d.Databytes+1 == 0 { // WTF?
-		d.Databytes--
+	if cfg.Databytes+1 == 0 { // WTF?
+		cfg.Databytes--
 	}
-
-	d.LocalIP = os.Getenv("TCPLOCALIP")
-	if d.LocalIP == "" {
-		d.LocalIP = "unknown"
-	}
-
-	d.LocalHost = os.Getenv("TCPLOCALHOST")
-	if d.LocalHost == "" {
-		d.LocalHost = d.LocalIP
-	}
-
-	d.RemoteIP = os.Getenv("TCPREMOTEIP")
-	if d.RemoteIP == "" {
-		d.RemoteIP = "unknown"
-	}
-
-	d.RemoteHost = os.Getenv("TCPREMOTEHOST")
-	if d.RemoteHost == "" {
-		d.RemoteHost = "unknown"
-	}
-
-	// cfg.RemoteInfo = os.Getenv("TCPREMOTEINFO") // ignoring
-	d.RelayClient, d.RelayClientOk = os.LookupEnv("RELAYCLIENT")
 
 	if !ipme.Init() {
 		die_ipme()
 	}
-	d.IPMe = ipmeAdapter{}
+	cfg.IPMe = ipmeAdapter{}
 
-	d.Qmail = qmailAdapter{}
+	cfg.Qmail = qmailAdapter{}
 
 	cert, err := tls.LoadX509KeyPair("control/servercert.pem", "control/servercert.pem")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	d.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	cfg.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
 
 	var logEnable bool
 	if i, r := control.ReadInt("control/smtplog"); r == -1 {
@@ -229,11 +218,11 @@ func prepareConfig() *smtpd.Config {
 	}
 	if logEnable {
 		pid := os.Getpid()
-		d.Logger = &logAdapter{log1.Writer{
+		cfg.Logger = &logAdapter{log1.Writer{
 			Out:    os.Stderr,
-			Prefix: fmt.Sprintf("smtp-log[%d]: %s: ", pid, d.RemoteIP),
+			Prefix: fmt.Sprintf("smtp-log[%d]: ", pid),
 		}}
 	}
 
-	return &d
+	return &cfg
 }
