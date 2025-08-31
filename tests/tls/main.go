@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"qmail-smtpd/internal/config"
-	"qmail-smtpd/internal/conn"
 	log1 "qmail-smtpd/internal/log"
+	"qmail-smtpd/internal/pipeconn"
+	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd"
 )
 
@@ -21,8 +22,8 @@ type Conn struct {
 	input      []byte
 	in         <-chan []byte
 	out        chan<- []byte
-	localAddr  conn.Addr
-	remoteAddr conn.Addr
+	localAddr  pipeconn.Addr
+	remoteAddr pipeconn.Addr
 }
 
 // Read reads data from the connection.
@@ -160,14 +161,17 @@ func main() {
 		log.Fatalf("LoadX509KeyPair: %v", err)
 	}
 
-	cfg := &smtpd.Config{
-		Greeting:   "localhost",
+	env := qmail.Env{
 		LocalIP:    "127.0.0.1",
 		LocalHost:  "localhost",
 		RemoteIP:   "127.0.0.1",
 		RemoteHost: "localhost",
-		Hostname:   "localhost",
-		TLSConfig:  &tls.Config{Certificates: []tls.Certificate{cert}},
+	}
+
+	cfg := &smtpd.Config{
+		Greeting:  "localhost",
+		Hostname:  "localhost",
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
 	}
 	if _, ok := os.LookupEnv("SMTPLOG"); ok {
 		cfg.Logger = &logAdapter{log1.Writer{
@@ -179,7 +183,7 @@ func main() {
 
 	done := make(chan struct{})
 	go func() {
-		serv.Run(servConn)
+		serv.Run(servConn, env)
 		servConn.Close()
 		done <- struct{}{}
 	}()

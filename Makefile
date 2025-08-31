@@ -18,7 +18,10 @@ qmail-queue: mkqmtree
 addcr: mkqmtree
 	go build -o $(BIN)/addcr$(EXT) ./cmd/addcr
 
-build: qmail-smtpd qmail-queue addcr
+safeout:
+	go build -o $(BIN)/safeout$(EXT) ./cmd/safeout
+
+build: qmail-smtpd qmail-queue addcr safeout
 
 test1: build
 	cat test1.txt | $(BIN)/addcr | AUTO_QMAIL=$(AUTO_QMAIL) QQ_OUT0=tmp/qq.out0 QQ_OUT1=tmp/qq.out1 $(BIN)/qmail-smtpd
@@ -26,5 +29,5 @@ test1: build
 smtpd-cover:
 	go test -coverprofile=$(TMP)/smtpd-cover.out ./internal/smtpd -run . && go tool cover -html $(TMP)/smtpd-cover.out
 
-test-tls:
-	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls
+test-tls: safeout
+	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls 2>&1 | $(BIN)/safeout
