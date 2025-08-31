@@ -27,7 +27,7 @@ func (d *Server) smtp_tls(ss *session, arg string) error {
 	d.resetAuthorized(ss)
 
 	// have to discard the pre-STARTTLS HELO/EHLO argument, if any
-	d.dohelo(ss, d.cfg.RemoteHost)
+	d.dohelo(ss, ss.env.RemoteHost)
 
 	return nil
 }

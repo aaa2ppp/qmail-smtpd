@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd/interfaces"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
@@ -18,7 +19,7 @@ type (
 	AddrMatcher = interfaces.AddrMatcher
 	IPMe        = interfaces.IPMe
 	Qmail       = interfaces.Qmail
-	QmailQueue  = interfaces.QmailQueue
+	Queue       = interfaces.Queue
 	LogWriter   = interfaces.LogWriter
 )
 
@@ -30,50 +31,39 @@ const (
 var ErrClientQuit = errors.New("client quit")
 
 type Config struct {
-	Greeting      string
-	Databytes     int
-	Timeout       time.Duration
-	RemoteIP      string
-	RemoteHost    string
-	LocalIPHost   string
-	LocalIP       string
-	LocalHost     string
-	RelayClient   string
-	RelayClientOk bool
-	RcptHosts     AddrMatcher
-	BadMailFrom   AddrMatcher
-	MbxHosts      AddrMatcher
-	IPMe          IPMe
-	Qmail         Qmail
-	Hostname      string
-	Auth          Authenticator
-	TLSConfig     *tls.Config
-	Logger        LogWriter
+	Greeting    string
+	Timeout     time.Duration
+	LocalIPHost string
+	RcptHosts   AddrMatcher
+	BadMailFrom AddrMatcher
+	MbxHosts    AddrMatcher
+	IPMe        IPMe
+	Qmail       Qmail
+	Hostname    string
+	Auth        Authenticator
+	TLSConfig   *tls.Config
+	Logger      LogWriter
+	Databytes   int
 }
 
 type sessionState struct {
-	// remoteInfo contains the authenticated username in the same way as in qmail-smtpd with auth patch.
-	// It set only after successful AUTH and is never set externally. Before calling `qmail-queue`,
-	// the TCPREMOTEINFO environment variable will be set from it.
-	remoteInfo string
-
-	relayClient   string
-	relayClientOk bool
-
-	helohost        string
-	fakehelo        string /* pointer into helohost, or 0 */
-	seenmail        bool
-	flagbarf        bool /* defined if seenmail */
-	mailfrom        string
-	rcptto          []string
-	qqt             QmailQueue
-	authorized      bool
-	tlsEnabled      bool
+	relayclient   string
+	relayclientok bool
+	helohost      string
+	fakehelo      string /* pointer into helohost, or 0 */
+	seenmail      bool
+	flagbarf      bool /* defined if seenmail */
+	mailfrom      string
+	rcptto        []string
+	authorized    bool
+	user          string
+	tlsEnabled    bool
 }
 
 type session struct {
 	*safeio.SafeIO
 	sessionState
+	env qmail.Env
 }
 
 func (ss *session) out(s string) error {
@@ -128,7 +118,7 @@ func (d *Server) smtp_quit(ss *session, _ string) error {
 
 func (d *Server) dohelo(ss *session, arg string) {
 	ss.helohost = arg
-	if !strings.EqualFold(d.cfg.RemoteHost, ss.helohost) {
+	if !strings.EqualFold(ss.env.RemoteHost, ss.helohost) {
 		ss.fakehelo = ss.helohost
 	}
 }
@@ -199,8 +189,8 @@ func (d *Server) smtp_rcpt(ss *session, arg string) error {
 	if ss.flagbarf {
 		return d.err_bmf(ss)
 	}
-	if ss.relayClientOk {
-		addr += ss.relayClient
+	if ss.relayclientok {
+		addr += ss.relayclient
 	} else {
 		if d.cfg.RcptHosts != nil && !d.cfg.RcptHosts.Match(addr) {
 			return d.err_nogateway(ss)
@@ -214,6 +204,11 @@ func (d *Server) smtp_rcpt(ss *session, arg string) error {
 	return ss.out("250 ok\r\n")
 }
 
+func (d *Server) straynewline(ss *session) error {
+	ss.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
+	return cmp.Or(ss.Flush(), ErrStrayNewLine)
+}
+
 func (d *Server) acceptmessage(ss *session, qp int) error {
 	when := time.Now()
 	_ = ss.out("250 ok ")
@@ -221,25 +216,6 @@ func (d *Server) acceptmessage(ss *session, qp int) error {
 	_ = ss.out(" qt ")
 	_ = ss.out(strconv.Itoa(qp))
 	return ss.out("\r\n")
-}
-
-func (d *Server) prepareQmailEnv(ss *session) []string {
-	env := []string{
-		"TCPREMOTEIP=" + d.cfg.RemoteIP,
-		"TCPREMOTEHOST=" + d.cfg.RemoteHost,
-		"PROTO=SMTP",
-		"DATABYTES=" + strconv.Itoa(d.cfg.Databytes),
-	}
-	if ss.authorized {
-		env = append(env, "TCPREMOTEINFO="+ss.remoteInfo)
-	}
-	if ss.relayClientOk {
-		env = append(env, "RELAYCLIENT="+ss.relayClient)
-	}
-	if v, ok := os.LookupEnv("QMAILQUEUE"); ok {
-		env = append(env, "QMAILQUEUE="+v)
-	}
-	return env
 }
 
 func (d *Server) smtp_data(ss *session, _ string) error {
@@ -250,55 +226,71 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 		return d.err_wantrcpt(ss)
 	}
 	ss.seenmail = false
+
 	if d.cfg.Qmail == nil {
 		return d.err_qqt(ss)
 	}
-	var err error
-	ss.qqt, err = d.cfg.Qmail.Open(d.prepareQmailEnv(ss))
+
+	qqt, err := d.cfg.Qmail.Begin(ss.mailfrom, ss.rcptto, ss.env)
 	if err != nil {
 		return d.err_qqt(ss)
 	}
-	qp := ss.qqt.Pid()
-	ss.out("354 go ahead\r\n")
+	defer qqt.Rollback()
 
-	received(ss.qqt, "SMTP", d.cfg.LocalHost, d.cfg.RemoteIP, d.cfg.RemoteHost, ss.remoteInfo, ss.fakehelo)
-
-	hops, overflow, err := d.blast(ss, d.cfg.Databytes)
-	if err != nil {
+	qp := qqt.Pid()
+	if err := ss.out("354 go ahead\r\n"); err != nil {
 		return err
+	}
+	ss.Flush()
+
+	received(
+		qqt,
+		ss.env.Proto,
+		ss.env.LocalHost,
+		ss.env.RemoteIP,
+		ss.env.RemoteHost,
+		ss.env.RemoteInfo,
+		ss.fakehelo,
+	)
+
+	_, blastErr := d.blast(qqt, ss, ss.env.Databytes)
+	if blastErr == ErrStrayNewLine {
+		return d.straynewline(ss)
 	}
 	// TODO: log received data bytes
 
-	too_many_hops := hops >= MaxHops
-	if too_many_hops {
-		ss.qqt.Fail()
+	if err := qqt.Commit(); err != nil {
+		var (
+			tempErr *qmail.TemporaryError
+			permErr *qmail.PermanentError
+		)
+		switch {
+		case errors.Is(err, qmail.ErrTxDone):
+			// blast called rollback
+		case errors.As(err, &tempErr):
+			_ = ss.out("451 ")
+			_ = ss.out(err.Error())
+			return ss.out("\r\n")
+		case errors.As(err, &permErr):
+			_ = ss.out("554 ")
+			_ = ss.out(err.Error())
+			return ss.out("\r\n")
+		default:
+			return err
+		}
 	}
 
-	ss.qqt.From(ss.mailfrom)
-	for _, it := range ss.rcptto {
-		ss.qqt.To(it)
+	if blastErr != nil {
+		switch err {
+		case ErrExceedingMaxHops:
+			return ss.out("554 too many hops, this message is looping (#5.4.6)\r\n")
+		case ErrDatabytesOverflow:
+			return ss.out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
+		}
+		return err
 	}
 
-	qqx := ss.qqt.Close()
-	ss.qqt = nil
-
-	if qqx == "" {
-		return d.acceptmessage(ss, qp)
-	}
-	if too_many_hops {
-		return ss.out("554 too many hops, this message is looping (#5.4.6)\r\n")
-	}
-	if d.cfg.Databytes > 0 && overflow == 0 {
-		return ss.out("552 sorry, that message size exceeds my databytes limit (#5.3.4)\r\n")
-	}
-
-	if qqx[0] == 'D' {
-		_ = ss.out("554 ")
-	} else {
-		_ = ss.out("451 ")
-	}
-	_ = ss.out(qqx[1:])
-	return ss.out("\r\n")
+	return d.acceptmessage(ss, qp)
 }
 
 type handlerFunc = func(ss *session, arg string) error
@@ -330,27 +322,28 @@ func newCommandTable(d *Server) commandTable {
 	}
 }
 
-func (d *Server) newSession(conn net.Conn) *session {
+func (d *Server) newSession(conn net.Conn, env qmail.Env) *session {
+	var logger LogWriter
+	if d.cfg.Logger != nil {
+		logger = d.cfg.Logger.WithPrefix(env.RemoteIP + ": ")
+	}
 	return &session{
-		SafeIO: safeio.New(conn, d.cfg.Logger, d.cfg.Timeout),
-		sessionState: sessionState{
-			relayClient:   d.cfg.RelayClient,
-			relayClientOk: d.cfg.RelayClientOk,
-		},
+		SafeIO: safeio.New(conn, logger, d.cfg.Timeout),
+		env:    env,
 	}
 }
 
 func (d *Server) run(ss *session) error {
-	d.dohelo(ss, d.cfg.RemoteHost)
 	d.smtp_greet(ss, "220 ")
-	ss.out(" ESMTP\r\n")
+	ss.out(" ")
+	ss.out(ss.env.Proto)
+	ss.out("\r\n")
+	// TODO: здесь нужен Flush()?
 
 	err := d.commandLoop(ss) // always return error
-
 	if err == ErrClientQuit {
 		return nil
 	}
-
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		d.err_timeout(ss)
 		ss.Flush()
@@ -359,7 +352,12 @@ func (d *Server) run(ss *session) error {
 	return err
 }
 
-func (d *Server) Run(conn net.Conn) error {
-	ss := d.newSession(conn)
+func (d *Server) Run(conn net.Conn, env qmail.Env) error {
+	env.Proto = "ESMTP"
+
+	ss := d.newSession(conn, env)
+	d.dohelo(ss, ss.env.RemoteHost)
+	d.resetAuthorized(ss)
+
 	return d.run(ss)
 }

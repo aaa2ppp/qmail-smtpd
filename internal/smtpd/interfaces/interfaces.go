@@ -2,7 +2,8 @@ package interfaces
 
 import (
 	"io"
-	
+
+	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/scan"
 )
 
@@ -15,17 +16,15 @@ type IPMe interface {
 }
 
 type Qmail interface {
-	Open(env []string) (QmailQueue, error)
+	Begin(mailForm string, rcptTo []string, opts qmail.Env) (Queue, error)
 }
 
-type QmailQueue interface {
+type Queue interface {
+	io.ByteWriter
+	io.StringWriter
 	Pid() int
-	Putc(byte)
-	Puts(string)
-	From(string)
-	To(string)
-	Fail()
-	Close() string
+	Rollback() error
+	Commit() error
 }
 
 type LogWriter interface { // XXX

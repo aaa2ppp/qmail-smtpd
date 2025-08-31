@@ -1,59 +1,55 @@
 package smtpd
 
 import (
-	"cmp"
 	"errors"
 )
 
-/*
-// TODO: развязать с Smtpd?
-func (d *Server) put(ss *session, ch byte) {
-	if ss.bytestooverflow != 0 {
-		ss.bytestooverflow--
-		if ss.bytestooverflow == 0 {
-			ss.qqt.Fail()
-		}
-	}
-	ss.qqt.Putc(ch)
-}
-*/
+var (
+	ErrStrayNewLine      = errors.New("stray new line")
+	ErrExceedingMaxHops  = errors.New("exceeding max hops")
+	ErrDatabytesOverflow = errors.New("databytes overflow")
+)
 
-var ErrStrayNewLine = errors.New("stray new line")
-
-func (d *Server) straynewline(ss *session) error {
-	ss.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
-	return cmp.Or(ss.Flush(), ErrStrayNewLine)
-}
-
-func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error) {
+func (d *Server) blast(qqt Queue, ss *session, limit int) (bytesRead int, _ error) {
 	var (
+		hops         = 0
 		state        = 1
 		flaginheader = true
 		pos          = 0    // number of bytes since most recent \n, if fih
-		flagmaybex   = true // 1 if this line might match RECEIVED, if fih
-		flagmaybey   = true // 1 if this line might match \r\n, if fih
-		flagmaybez   = true // 1 if this line might match DELIVERED, if fih
+		flagmaybex   = true // true if this line might match RECEIVED, if fih
+		flagmaybey   = true // true if this line might match \r\n, if fih
+		flagmaybez   = true // true if this line might match DELIVERED, if fih
+		anyErr       error
 	)
 
-	if limit > 0 {
-		overflow = limit + 1
+	setError := func(err error) {
+		if anyErr == nil {
+			anyErr = err
+			qqt.Rollback()
+		}
 	}
 
 	put := func(ch byte) {
-		if overflow != 0 {
-			overflow--
-			if overflow == 0 {
-				ss.qqt.Fail()
-			}
+		if anyErr != nil {
+			return
 		}
-		ss.qqt.Putc(ch)
+		_ = qqt.WriteByte(ch)
+	}
+
+	if limit == 0 {
+		limit = -1
 	}
 
 	for {
 		ch, err := ss.ReadByte()
 		if err != nil {
-			return hops, overflow, err
+			return bytesRead, err
 		}
+		if bytesRead == limit {
+			// обнаружили, что сообщение больше лимита
+			setError(ErrDatabytesOverflow)
+		}
+		bytesRead++
 
 		if flaginheader {
 			if pos < 9 {
@@ -61,6 +57,10 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 					flagmaybez = false
 				}
 				if flagmaybez && pos == 8 {
+					if hops == MaxHops {
+						// обнаружили, что привышено число хопов
+						setError(ErrExceedingMaxHops)
+					}
 					hops++
 				}
 				if pos < 8 {
@@ -69,6 +69,10 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 					}
 				}
 				if flagmaybex && pos == 7 {
+					if hops == MaxHops {
+						// обнаружили, что привышено число хопов
+						setError(ErrExceedingMaxHops)
+					}
 					hops++
 				}
 				if pos < 2 && ch != "\r\n"[pos] {
@@ -90,7 +94,7 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 		switch state {
 		case 0:
 			if ch == '\n' {
-				return hops, overflow, d.straynewline(ss)
+				return bytesRead, ErrStrayNewLine
 			}
 			if ch == '\r' {
 				state = 4
@@ -98,7 +102,7 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 			}
 		case 1: /* \r\n */
 			if ch == '\n' {
-				return hops, overflow, d.straynewline(ss)
+				return bytesRead, ErrStrayNewLine
 			}
 			if ch == '.' {
 				state = 2
@@ -111,7 +115,7 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 			state = 0
 		case 2: /* \r\n + . */
 			if ch == '\n' {
-				return hops, overflow, d.straynewline(ss)
+				return bytesRead, ErrStrayNewLine
 			}
 			if ch == '\r' {
 				state = 3
@@ -120,7 +124,7 @@ func (d *Server) blast(ss *session, limit int) (hops int, overflow int, _ error)
 			state = 0
 		case 3: /* \r\n + .\r */
 			if ch == '\n' {
-				return hops, overflow, nil
+				return bytesRead, anyErr
 			}
 			put('.')
 			put('\r')

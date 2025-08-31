@@ -238,14 +238,16 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 
 func (d *Server) setAuthorized(ss *session, user string) {
 	ss.authorized = true
-	ss.remoteInfo = user
-	ss.relayClient = ""
-	ss.relayClientOk = true
+	ss.user = user
+	ss.env.RemoteInfo = user
+	ss.relayclient = ""
+	ss.relayclientok = true
 }
 
 func (d *Server) resetAuthorized(ss *session) {
 	ss.authorized = false
-	ss.remoteInfo = ""
-	ss.relayClient = d.cfg.RelayClient
-	ss.relayClientOk = d.cfg.RelayClientOk
+	ss.user = ""
+	ss.env.RemoteInfo = ""
+	ss.relayclient = ss.env.RelayClient
+	ss.relayclientok = ss.env.RelayClientOk
 }

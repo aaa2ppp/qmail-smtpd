@@ -1,6 +1,7 @@
 package smtpd
 
 import (
+	"qmail-smtpd/internal/qmail"
 	"reflect"
 	"testing"
 	"time"
@@ -58,8 +59,8 @@ quit
 		},
 		{
 			"relayclient",
-			&Config{RcptHosts: alwaysNotMatch{}, RelayClientOk: true},
-			sessionState{},
+			&Config{RcptHosts: alwaysNotMatch{}},
+			sessionState{relayclientok: true},
 			newFakeReader("helo\nmail from:<>\nrcpt to:<>\nquit\n"),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 221},
@@ -342,10 +343,10 @@ quit
 		{
 			"data - ok",
 			&Config{
-				LocalHost:  "mx.pupkin.org",
-				RemoteIP:   "192.168.69.69",
-				RemoteHost: "vasya.pupkin.org",
-				Qmail:      &fakeQueue{},
+				// LocalHost:  "mx.pupkin.org",
+				// RemoteIP:   "192.168.69.69",
+				// RemoteHost: "vasya.pupkin.org",
+				Qmail: &fakeQueue{},
 			},
 			sessionState{},
 			newFakeReader(addCr(`helo localhost
@@ -357,7 +358,7 @@ Subject: Hello
 Hello, Masha!
 .
 quit
-`)),
+			`)),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 354, 250, 221},
 			false,
@@ -365,10 +366,10 @@ quit
 		{
 			"data - no CR",
 			&Config{
-				LocalHost:  "mx.pupkin.org",
-				RemoteIP:   "192.168.69.69",
-				RemoteHost: "vasya.pupkin.org",
-				Qmail:      &fakeQueue{},
+				// LocalHost:  "mx.pupkin.org",
+				// RemoteIP:   "192.168.69.69",
+				// RemoteHost: "vasya.pupkin.org",
+				Qmail: &fakeQueue{},
 			},
 			sessionState{},
 			newFakeReader(delCr(`helo localhost
@@ -380,7 +381,7 @@ Subject: Hello
 Hello, Masha!
 .
 quit
-`)),
+			`)),
 			&fakeWriter{},
 			[]int{220, 250, 250, 250, 354, 451},
 			true,
@@ -388,9 +389,17 @@ quit
 		// TODO: Add test cases.
 	}
 
+	// xxx
+	env := qmail.Env{
+		LocalHost:  "mx.pupkin.org",
+		RemoteIP:   "192.168.69.69",
+		RemoteHost: "vasya.pupkin.org",
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, ss := createServerAndSessionWithRW(tt.cfg, tt.state, tt.r, tt.w)
+			ss.env = env
 			alreadyShowed := false
 
 			if err := srv.run(ss); (err != nil) != tt.wantErr {

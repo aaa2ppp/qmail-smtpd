@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"qmail-smtpd/internal/conn"
+	"qmail-smtpd/internal/pipeconn"
+	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/scan"
 )
 
@@ -101,21 +102,19 @@ type fakeQueue struct {
 	result string
 }
 
-func (qq *fakeQueue) Open(env []string) (QmailQueue, error) {
+func (qq *fakeQueue) Begin(mailForm string, rcptTo []string, opts qmail.Env) (Queue, error) {
 	return qq, nil
 }
 
-func (qq *fakeQueue) Pid() int      { return 7777 }
-func (qq *fakeQueue) Putc(_ byte)   {}
-func (qq *fakeQueue) Puts(_ string) {}
-func (qq *fakeQueue) From(_ string) {}
-func (qq *fakeQueue) To(_ string)   {}
-func (qq *fakeQueue) Fail()         { qq.result = "D*** Fail() called ***" }
-func (qq *fakeQueue) Close() string { return qq.result }
+func (qq *fakeQueue) Pid() int                          { return 7777 }
+func (qq *fakeQueue) WriteByte(_ byte) error            { return nil }
+func (qq *fakeQueue) WriteString(s string) (int, error) { return len(s), nil }
+func (qq *fakeQueue) Commit() error                     { return nil }
+func (qq *fakeQueue) Rollback() error                   { return nil }
 
 var (
-	_ Qmail      = (*fakeQueue)(nil)
-	_ QmailQueue = (*fakeQueue)(nil)
+	_ Qmail = (*fakeQueue)(nil)
+	_ Queue = (*fakeQueue)(nil)
 )
 
 func extractCodes(answers string) []int {
@@ -162,11 +161,11 @@ func createServerAndSession(cfg *Config, state sessionState) (*Server, *session,
 
 func createServerAndSessionWithRW(cfg *Config, state sessionState, r *fakeReader, w *fakeWriter) (*Server, *session) {
 	srv := NewServer(cfg)
-	conn := &conn.Conn{
+	conn := &pipeconn.Conn{
 		Reader: r,
 		Writer: w,
 	}
-	ss := srv.newSession(conn)
+	ss := srv.newSession(conn, qmail.Env{})
 	if !reflect.DeepEqual(state, sessionState{}) {
 		ss.sessionState = state
 	}

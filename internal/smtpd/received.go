@@ -30,12 +30,12 @@ func issafe(ch byte) bool {
 	return false
 }
 
-func safeput(qqt QmailQueue, s string) {
+func safeput(qqt Queue, s string) {
 	for _, ch := range []byte(s) {
 		if !issafe(ch) {
 			ch = '?'
 		}
-		qqt.Putc(ch)
+		qqt.WriteByte(ch)
 	}
 }
 
@@ -43,33 +43,33 @@ func safeput(qqt QmailQueue, s string) {
 /* "  by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000\n" */
 
 func received(
-	qqt QmailQueue,
+	qqt Queue,
 	protocol string,
 	local string,
 	remoteip string,
 	remotehost string,
 	remoteinfo string,
 	helo string,
-) {
-	qqt.Puts("Received: from ")
+) error {
+	qqt.WriteString("Received: from ")
 	safeput(qqt, remotehost)
 	if helo != "" {
-		qqt.Puts(" (HELO ")
+		qqt.WriteString(" (HELO ")
 		safeput(qqt, helo)
-		qqt.Puts(")")
+		qqt.WriteString(")")
 	}
-	qqt.Puts(" (")
+	qqt.WriteString(" (")
 	if remoteinfo != "" {
 		safeput(qqt, remoteinfo)
-		qqt.Puts("@")
+		qqt.WriteString("@")
 	}
 	safeput(qqt, remoteip)
-	qqt.Puts(")\n  by ")
+	qqt.WriteString(")\n  by ")
 	safeput(qqt, local)
-	qqt.Puts(" with ")
-	qqt.Puts(protocol)
-	qqt.Puts("; ")
+	qqt.WriteString(" with ")
+	qqt.WriteString(protocol)
+	qqt.WriteString("; ")
 	dt := time.Now()
-	qqt.Puts(dt.Format("2 Jan 2006 15:04:05 -0700"))
-	qqt.Putc('\n')
+	qqt.WriteString(dt.Format("2 Jan 2006 15:04:05 -0700"))
+	return qqt.WriteByte('\n')
 }
