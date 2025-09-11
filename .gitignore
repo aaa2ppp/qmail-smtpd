@@ -1,4 +1,8 @@
 .DS_Store
 *.exe
+*.bin
 *.out
+*.pprof
 tmp/
+bak/
+bak[0-9]/
