@@ -3,6 +3,7 @@ BIN=$(AUTO_QMAIL)/bin
 TMP=$(AUTO_QMAIL)/tmp
 CONTROL=$(AUTO_QMAIL)/control
 EXT=`uname | grep -q NT && echo .exe`
+RUN ?= .
 
 .PHONY: run qmail-smtpd qmail-queue mktmpdir test1 addcr
 
@@ -27,7 +28,7 @@ test1: build
 	cat test1.txt | $(BIN)/addcr | AUTO_QMAIL=$(AUTO_QMAIL) QQ_OUT0=tmp/qq.out0 QQ_OUT1=tmp/qq.out1 $(BIN)/qmail-smtpd
 
 smtpd-cover:
-	go test -coverprofile=$(TMP)/smtpd-cover.out ./internal/smtpd -run . && go tool cover -html $(TMP)/smtpd-cover.out
+	go test -run $(RUN) -coverprofile=$(TMP)/smtpd-cover.out ./internal/smtpd && go tool cover -html $(TMP)/smtpd-cover.out
 
 test-tls: safeout
 	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls 2>&1 | $(BIN)/safeout

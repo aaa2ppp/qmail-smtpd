@@ -1,186 +1,70 @@
+// == smtpd/auth.go ==
+
 package smtpd
 
 import (
 	"cmp"
 	"errors"
-	"os"
-	"strconv"
+	"log"
 	"strings"
-	"time"
 )
 
+// SMTP AUTH implementation according to RFC 4954
+// Supported mechanisms:
+// - PLAIN (RFC 4616)
+// - CRAM-MD5 (RFC 2195)
+// - LOGIN (non-standard, for backward compatibility)
+
+// NOTE: Consider moving to interfaces/ package in a separate refactoring.
+// This change should be atomic and focused solely on interface relocation.
 type Authenticator interface {
-	Authenticate(user, pass, resp string) bool
+	Authenticate(cred Credentials) (authResult, error)
 }
 
-type authAttributes struct {
-	user string
-	pass string
-	resp string
+// errAuthRejected internal signal error
+var errAuthRejected = errors.New("auth malformed or canceled")
+
+// authHandler handles SMTP authentication using various mechanisms
+type authHandler struct {
+	cfg *Config
 }
 
-func (d *Server) auth_err_input(ss *session) error {
-	return ss.out("501 malformed auth input (#5.5.4)\r\n")
+// malformedInput sends 501 to client, always returns errAuthRejected or IO error
+func (h authHandler) malformedInput(ss *session) error {
+	return cmp.Or(ss.out("501 malformed auth input (#5.5.4)\r\n"), errAuthRejected)
 }
 
-func (d *Server) auth_prompt(ss *session, prompt string) error {
+func (h authHandler) challenge(ss *session, challenge string) error {
 	_ = ss.out("334 ")
-	_ = ss.out(b64encode(prompt))
+	_ = ss.out(b64encode(challenge))
 	_ = ss.out("\r\n")
 	return ss.Flush()
 }
 
-var ErrAuthFailed = errors.New("auth failed")
-
-func (d *Server) auth_getln(ss *session) (string, error) {
+func (h authHandler) response(ss *session) (string, error) {
 	s, err := ss.ReadLine()
 	if err != nil {
 		return "", err
 	}
 	if s == "*" {
-		return "", cmp.Or(ss.out("501 auth exchange cancelled (#5.0.0)\r\n"), ErrAuthFailed)
+		return "", cmp.Or(ss.out("501 auth exchange cancelled (#5.0.0)\r\n"), errAuthRejected)
 	}
-	return d.auth_decode(ss, s)
+	return h.decodeResponse(ss, s)
 }
 
-func (d *Server) auth_decode(ss *session, s string) (string, error) {
-	var ok bool
-	s, ok = b64decode(s)
+func (h authHandler) decodeResponse(ss *session, s string) (string, error) {
+	decoded, ok := b64decode(s)
 	if !ok {
-		return "", cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
+		return "", h.malformedInput(ss)
 	}
-	return s, nil
+	return decoded, nil
 }
 
-func (d *Server) auth_login(ss *session, arg string) (authAttributes, error) {
-	var (
-		aa  authAttributes
-		err error
-	)
-
-	if arg != "" {
-		if aa.user, err = d.auth_decode(ss, arg); err != nil {
-			return aa, err
-		}
-	} else {
-		d.auth_prompt(ss, "Username:")
-		if aa.user, err = d.auth_getln(ss); err != nil {
-			return aa, err
-		}
-	}
-	if aa.user == "" {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	d.auth_prompt(ss, "Password:")
-	if aa.pass, err = d.auth_getln(ss); err != nil {
-		return aa, err
-	}
-	if aa.pass == "" {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	return aa, nil
-}
-
-func (d *Server) auth_plain(ss *session, arg string) (authAttributes, error) {
-	var (
-		aa   authAttributes
-		slop string
-		err  error
-	)
-
-	if arg != "" {
-		if slop, err = d.auth_decode(ss, arg); err != nil {
-			return aa, err
-		}
-	} else {
-		if err := d.auth_prompt(ss, ""); err != nil {
-			return aa, err
-		}
-		if slop, err = d.auth_getln(ss); err != nil {
-			return aa, err
-		}
-	}
-
-	/* ignore authorize-id */
-	i := strings.IndexByte(slop, 0)
-	if i == -1 {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	slop = slop[i+1:]
-	i = strings.IndexByte(slop, 0)
-	if i == -1 {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-	aa.user = slop[:i]
-
-	slop = slop[i+1:]
-	i = strings.IndexByte(slop, 0) // ???
-	if i == -1 {
-		i = len(slop)
-	}
-	aa.pass = slop[:i]
-
-	if aa.user == "" || aa.pass == "" {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	return aa, nil
-}
-
-func cram_request(hostname string) string {
-	var buf strings.Builder
-	buf.WriteByte('<')
-	buf.WriteString(strconv.Itoa(os.Getpid()))
-	buf.WriteByte('.')
-	buf.WriteString(strconv.FormatInt(time.Now().Unix(), 10))
-	buf.WriteByte('@')
-	buf.WriteString(hostname)
-	buf.WriteByte('>')
-	return buf.String()
-}
-
-func (d *Server) auth_cram(ss *session, arg string) (authAttributes, error) {
-	var (
-		aa   authAttributes
-		slop string
-		err  error
-	)
-
-	if arg != "" {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	aa.pass = cram_request(d.cfg.Hostname)
-	if err := d.auth_prompt(ss, aa.pass); err != nil {
-		return aa, err
-	}
-	if slop, err = d.auth_getln(ss); err != nil {
-		return aa, err
-	}
-
-	i := strings.IndexByte(slop, ' ')
-	if i == -1 {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-	aa.user = slop[:i]
-
-	slop = slop[i+1:]
-	for len(slop) > 0 && slop[0] == ' ' {
-		slop = slop[1:]
-	}
-	aa.resp = slop
-
-	if aa.user == "" || aa.resp == "" {
-		return aa, cmp.Or(d.auth_err_input(ss), ErrAuthFailed)
-	}
-
-	return aa, nil
-}
-
+// smtp_auth handles SMTP AUTH command
 func (d *Server) smtp_auth(ss *session, arg string) error {
+	auth := authHandler{cfg: d.cfg}
+
+	// Preliminary checks
 	if d.cfg.Auth == nil || d.cfg.Hostname == "" {
 		return ss.out("503 auth not available (#5.3.3)\r\n")
 	}
@@ -191,55 +75,58 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 		return ss.out("503 no auth during mail transaction (#5.5.0)\r\n")
 	}
 
-	i := strings.IndexByte(arg, ' ')
-	if i == -1 {
-		i = len(arg)
-	}
+	mechanism, arg := parseCmdLine(arg)
 
-	cmd := arg[:i]
-	arg = arg[i:]
-	for len(arg) > 0 && arg[0] == ' ' {
-		arg = arg[1:]
-	}
+	// Select authentication mechanism
+	var (
+		cred Credentials
+		err  error
+	)
 
-	var authFn func(ss *session, arg string) (authAttributes, error)
-	switch strings.ToLower(cmd) {
+	switch strings.ToLower(mechanism) {
 	case "login":
 		if !ss.tlsEnabled {
 			return ss.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
-		authFn = d.auth_login
+		cred, err = auth.login(ss, arg)
 	case "plain":
 		if !ss.tlsEnabled {
 			return ss.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
-		authFn = d.auth_plain
+		cred, err = auth.plain(ss, arg)
 	case "cram-md5":
-		authFn = d.auth_cram
+		cred, err = auth.cram(ss, arg)
 	default:
 		return ss.out("504 auth type unimplemented (#5.5.1)\r\n")
 	}
 
-	aa, err := authFn(ss, arg)
 	if err != nil {
-		if errors.Is(err, ErrAuthFailed) {
-			return nil
+		if errors.Is(err, errAuthRejected) {
+			return nil // Error already sent to client
 		}
 		return err
 	}
 
-	if !d.cfg.Auth.Authenticate(aa.user, aa.pass, aa.resp) {
-		return ss.out("535 authorization failed (#5.7.0)\r\n")
+	res, err := d.cfg.Auth.Authenticate(cred)
+
+	if err != nil {
+		// Internal server error - log the details but don't expose to client
+		log.Printf("Authentication backend error: %v", err)
+		return ss.out("454 temporary authentication failure (#4.7.0)\r\n")
+	}
+	if !res.Success {
+		// Authentication failed - permanent failure
+		return ss.out("535 authentication credentials invalid (#5.7.0)\r\n")
 	}
 
-	d.setAuthorized(ss, aa.user)
+	d.setAuthorized(ss, res.Username)
 	return ss.out("235 ok, go ahead (#2.0.0)\r\n")
 }
 
-func (d *Server) setAuthorized(ss *session, user string) {
+func (d *Server) setAuthorized(ss *session, username string) {
 	ss.authorized = true
-	ss.user = user
-	ss.env.RemoteInfo = user
+	ss.user = username
+	ss.env.RemoteInfo = username
 	ss.relayclient = ""
 	ss.relayclientok = true
 }

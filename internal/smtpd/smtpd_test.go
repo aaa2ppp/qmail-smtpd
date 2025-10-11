@@ -176,7 +176,7 @@ quit
 		},
 		{
 			"auth login - oops! need starttls",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
@@ -188,7 +188,7 @@ quit
 		},
 		{
 			"auth login - ok",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login dmFzeWFAcHVwa2luLm9yZwo=
@@ -201,7 +201,7 @@ quit
 		},
 		{
 			"auth login - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login vasya@pupkin.org
@@ -213,7 +213,7 @@ quit
 		},
 		{
 			"auth login2 - ok",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
@@ -227,7 +227,7 @@ quit
 		},
 		{
 			"auth login2 - ok",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
@@ -241,7 +241,7 @@ quit
 		},
 		{
 			"auth login2 - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth login
@@ -254,7 +254,7 @@ quit
 		},
 		{
 			"auth plain - oops! need starttls",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
@@ -266,7 +266,7 @@ quit
 		},
 		{
 			"auth plain - ok",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=
@@ -278,7 +278,7 @@ quit
 		},
 		{
 			"auth plain - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 12345` + "\x00" + `vasya@pupkin.org` + "\x00" + `my strong password
@@ -290,7 +290,7 @@ quit
 		},
 		{
 			"auth plain2 - ok",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain 
@@ -303,7 +303,7 @@ quit
 		},
 		{
 			"auth plain2 - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			newFakeReader(`ehlo
 auth plain
@@ -316,7 +316,7 @@ quit
 		},
 		{
 			"auth cram-md5 - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			newFakeReader(`ehlo
 auth cram-md5
@@ -329,7 +329,7 @@ quit
 		},
 		{
 			"auth cram-md5 - oops! need base64 encoding",
-			&Config{Hostname: "localhost", Auth: alwaysAuth{}},
+			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			newFakeReader(`ehlo
 auth cram-md5

@@ -54,10 +54,6 @@ func (a ipmeAdapter) Is(ip scan.IPAddress) bool {
 	return ipme.Is(ip)
 }
 
-type authAdapter struct {
-	childargs []string
-}
-
 type logAdapter struct {
 	log1.Writer
 }
@@ -67,14 +63,6 @@ func (a *logAdapter) WithPrefix(prefix string) smtpd.LogWriter {
 		Out:    a.Out,
 		Prefix: a.Prefix + prefix,
 	}}
-}
-
-func (a authAdapter) Authenticate(user, pass, resp string) bool {
-	ok, err := auth.Authenticate(a.childargs, user, pass, resp)
-	if err != nil {
-		log.Printf("can't authenticate %s: %v", user, err)
-	}
-	return ok
 }
 
 func main() {
@@ -88,7 +76,9 @@ func main() {
 	cfg := prepareConfig()
 	if len(os.Args) > 1 {
 		cfg.Hostname = os.Args[1]
-		cfg.Auth = authAdapter{childargs: os.Args[2:]}
+		path := os.Args[1]
+		args := os.Args[2:]
+		cfg.Auth = auth.NewVchkpwCommand(path, args...)
 	}
 
 	srv := smtpd.NewServer(cfg)
