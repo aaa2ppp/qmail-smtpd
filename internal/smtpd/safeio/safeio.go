@@ -104,26 +104,27 @@ func (cio *SafeIO) ReadLine() (string, error) {
 		}
 	}
 
-	line, err := cio.r.ReadString('\n')
+	lineBytes, err := cio.r.ReadSlice('\n')
+
+	// logging input data, if any, before checking for errors
+	if cio.logEnabled && cio.logIn != nil && len(lineBytes) > 0 {
+		cio.logIn.WriteString(string(lineBytes))
+		cio.logIn.Flush()
+	}
+
 	if err != nil {
 		return "", err
 	}
 
-	if cio.logIn != nil && cio.logEnabled {
-		cio.logIn.WriteString(line)
-		cio.logIn.Flush()
-	}
-
-	// cut out '\n'
-	n := len(line)
-	line = line[:n-1]
+	// cut out \n
+	n := len(lineBytes) - 1
 
 	// cut out '\r' if exists
-	if n > 1 && line[n-2] == '\r' {
-		line = line[:n-2]
+	if n >= 1 && lineBytes[n-1] == '\r' {
+		n--
 	}
 
-	return line, nil
+	return string(lineBytes[:n]), nil
 }
 
 func (cio *SafeIO) ReadByte() (byte, error) {
