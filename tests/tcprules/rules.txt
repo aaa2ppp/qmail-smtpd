@@ -1,0 +1,20 @@
+# Базовые правила доступа
+127.0.0.1:allow
+192.168.1.:allow
+10.:deny
+
+# Правила с переменными окружения
+1.2.3.4:allow,RELAYCLIENT="1"
+5.6.7.8:allow,RELAYCLIENT="1",TCPLOCALIP="1.2.3.4"
+
+# Правила с разными кавычками
+8.8.8.8:allow,NAME=|google|,DNS="8.8.8.8"
+9.9.9.9:allow,NAME='quad9',DNS='9.9.9.9'
+1.1.1.1:allow,NAME="cloudflare",DNS="1.1.1.1"
+
+# Подсети
+172.16-31.:deny,REASON="private"
+169.254.0.:deny,REASON="link-local"
+
+# Правило по умолчанию (должно быть последним)
+:deny,REASON="default_deny"

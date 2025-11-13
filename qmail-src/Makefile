@@ -1,11 +1,13 @@
-QMAIL := qmail-1.03
-NETQMAIL := netqmail-1.06
-NAME ?= $(NETQMAIL)
-MD5 := ./md5.sh
+QMAIL     := qmail-1.03
+NETQMAIL  := netqmail-1.06
+UCSPI_TCP := ucspi-tcp-0.88
+NAME      ?= $(NETQMAIL)
+MD5       := ./md5.sh
 
 all: unpack
 
 .PHONY: clean all
+
 
 .fetch-$(NAME):
 	curl `cat $(NAME).tar.gz.url` -o $(NAME).tar.gz
@@ -32,4 +34,4 @@ clean-all:
 	rm -fr *.tar.gz $(QMAIL) $(NETQMAIL) .fetch-* .check-* .unpack-* $(MD5)
 
 clean-src:
-	rm -fr $(QMAIL) $(NETQMAIL)
+	rm -fr $(QMAIL) $(NETQMAIL) .unpack-*
