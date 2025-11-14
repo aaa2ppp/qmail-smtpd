@@ -8,6 +8,7 @@ for dir in "$@"; do
     find "$dir" -type f     \
         ! -path './.*'      \
         ! -path './tmp/*'   \
+        ! -path './bin/*'   \
         ! -path './data/*'  \
         ! -path './migrations/test/*' \
         \( \
@@ -27,15 +28,9 @@ for dir in "$@"; do
         # Убираем ./ в начале пути
         f="${f#./}"
         
-        # Выбираем разделитель в зависимости от типа файла
-        case "$f" in
-            *.go|*.js) sep="//" ;;
-            *.sql)     sep="--" ;;
-            *)         sep="#"  ;;
-        esac
-        
         # Выводим содержимое с заголовком
-        echo "$sep == $f =="
+        echo "== $f =="
+        echo
         cat "$f"
         echo
     done
