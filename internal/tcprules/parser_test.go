@@ -77,7 +77,7 @@ func TestEdgeCases(t *testing.T) {
 		{
 			name:  "trailing dot",
 			input: "192.168.1.",
-			want:  []string{"192.168.1"},
+			want:  []string{"192.168.1."},
 		},
 		{
 			name:    "multiple trailing dots",

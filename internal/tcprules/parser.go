@@ -139,6 +139,9 @@ func (p *Parser) expandAddressRange(address []byte) (iter.Seq[[]byte], error) {
 
 		generate = func(prefix []byte, depth int) bool {
 			if depth == len(ranges) {
+				if depth < 4 {
+					prefix = append(prefix, '.')
+				}
 				return yield(prefix[1:])
 			}
 
