@@ -116,6 +116,8 @@ func Begin(mailFrom string, rcptTo []string, env Env) (qt *Queue, err error) {
 	}
 
 	return &Queue{
+		mailFrom: mailFrom,
+		rcptTo:   rcptTo,
 		queue:    queue,
 		message:  message,
 		envelope: envelope,

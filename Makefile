@@ -1,9 +1,6 @@
 AUTO_QMAIL    ?= ./var/qmail
-QMAIL_BIN     := $(AUTO_QMAIL)/bin
-QMAIL_TMP     := $(AUTO_QMAIL)/tmp
-QMAIL_CONTROL := $(AUTO_QMAIL)/control
 
-BIN_DIR ?= $(QMAIL_BIN)
+BIN_DIR ?= $(AUTO_QMAIL)/bin
 TMP_DIR ?= ./tmp
 
 GOEXE := $(shell go env GOEXE)
@@ -92,20 +89,15 @@ patch: test
 .PHONY: qmail-tree qmail-test1 qmail-test-tls qmail-test-tcprules
 
 qmail-tree:
-	mkdir -p $(QMAIL_BIN)
-	mkdir -p $(QMAIL_TMP)
-	mkdir -p $(QMAIL_CONTROL)
+	mkdir -p $(AUTO_QMAIL)
+	cd $(AUTO_QMAIL)
+	mkdir bin tmp control
 
-qmail-test1: $(QMAIL_BIN)/addcr $(QMAIL_BIN)/qmail-smtpd
-	cat test1.txt | $(QMAIL_BIN)/addcr | \
-	AUTO_QMAIL=$(AUTO_QMAIL) \
-	TCPLOCALIP=127.0.0.1 \
-	TCPREMOTEIP=127.0.0.1 \
-	QQ_OUT0=tmp/qq.out0 QQ_OUT1=tmp/qq.out1 \
-	$(QMAIL_BIN)/qmail-smtpd
+qmail-test1: $(AUTO_QMAIL)/bin/addcr $(AUTO_QMAIL)/bin/qmail-smtpd
+	AUTO_QMAIL=$(AUTO_QMAIL) sh ./tests/test1/test.sh
 
-qmail-test-tls: $(QMAIL_BIN)/safeout
-	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls 2>&1 | $(QMAIL_BIN)/safeout
+qmail-test-tls: $(AUTO_QMAIL)/bin/safeout
+	AUTO_QMAIL=$(AUTO_QMAIL) go run ./tests/tls 2>&1 | $(AUTO_QMAIL)/bin/safeout
 
-qmail-test-tcprules: $(QMAIL_BIN)/tcprules
+qmail-test-tcprules: $(AUTO_QMAIL)/bin/tcprules
 	AUTO_QMAIL=$(AUTO_QMAIL) sh ./tests/tcprules/test.sh
