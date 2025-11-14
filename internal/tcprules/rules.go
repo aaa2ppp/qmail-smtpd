@@ -32,28 +32,68 @@ func New(db DB) *Rules {
 	return &Rules{db}
 }
 
+// GetByIP простой поиск по IP и префиксам IP, если поиск по хосту не нужен
 func (r *Rules) GetByIP(ip string) (Result, error) {
-	// ищем от полного IP до пустой строки
-	// "192.168.1.100" -> "192.168.1." -> "192.168." -> "192." -> ""
+	return r.GetByIPHost(ip, "")
+}
 
+// GetByIPHost
+func (r *Rules) GetByIPHost(ip, host string) (Result, error) {
 	var rule string
 	err := r.db.Do(func(q Getter) error {
-		for i := len(ip) - 1; ; {
-			key := ip[:i+1]
-			var err error
-			rule, err = q.Get(key)
-			if err != nil && err != ErrNotFound {
-				return err
-			}
+		var err error
+
+		// ищем полный IP
+		rule, err = q.Get(ip)
+		if err == nil {
+			return nil
+		}
+		if err != ErrNotFound {
+			return err
+		}
+
+		// ищем полный хост если есть
+		if host != "" {
+			rule, err = q.Get("=" + host)
 			if err == nil {
 				return nil
 			}
-			if i == -1 {
-				break
+			if err != ErrNotFound {
+				return err
 			}
-			i = strings.LastIndexByte(ip[:i], '.')
 		}
-		return ErrNotFound
+
+		// ищем по префиксу IP (до последнего октета)
+		rule, err = r.getByIPPrefixes(q, ip)
+		if err == nil {
+			return nil
+		}
+		if err != ErrNotFound {
+			return err
+		}
+
+		// ищем по суффиксу FQDN (до пустой строки), если есть
+		if host != "" {
+			rule, err = r.getByHostSuffixes(q, host)
+			if err == nil {
+				return nil
+			}
+			if err != ErrNotFound {
+				return err
+			}
+
+			rule, err = q.Get("=")
+			if err == nil {
+				return nil
+			}
+			if err != ErrNotFound {
+				return err
+			}
+		}
+
+		// ищем пустой ключ
+		rule, err = q.Get("")
+		return err
 	})
 
 	if err != nil {
@@ -61,6 +101,44 @@ func (r *Rules) GetByIP(ip string) (Result, error) {
 	}
 
 	return ParseBinRule(rule)
+}
+
+func (r *Rules) getByIPPrefixes(q Getter, ip string) (string, error) {
+	i := len(ip)
+	for {
+		i = strings.LastIndexByte(ip[:i], '.')
+		if i == -1 {
+			break
+		}
+		rule, err := q.Get(ip[:i+1])
+		if err == nil {
+			return rule, nil
+		}
+		if err != ErrNotFound {
+			return "", err
+		}
+	}
+	return "", ErrNotFound
+}
+
+func (r *Rules) getByHostSuffixes(q Getter, fqdn string) (string, error) {
+	i := -1
+	for {
+		if j := strings.IndexByte(fqdn[i+1:], '.'); j == -1 {
+			break
+		} else {
+			i += 1 + j
+		}
+
+		rule, err := q.Get("=" + fqdn[i:])
+		if err == nil {
+			return rule, nil
+		}
+		if err != ErrNotFound {
+			return "", err
+		}
+	}
+	return "", ErrNotFound
 }
 
 func ParseBinRule(data string) (Result, error) {
