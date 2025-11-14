@@ -4,7 +4,7 @@ import (
 	"io"
 
 	"qmail-smtpd/internal/qmail"
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 type AddrMatcher interface {

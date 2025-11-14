@@ -1,6 +1,7 @@
 package smtpd
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"net"
@@ -28,6 +29,7 @@ const (
 var ErrClientQuit = errors.New("client quit")
 
 type Config struct {
+	Me          string
 	Greeting    string
 	Timeout     time.Duration
 	LocalIPHost string
@@ -36,7 +38,7 @@ type Config struct {
 	MbxHosts    AddrMatcher
 	IPMe        IPMe
 	Qmail       Qmail
-	Hostname    string
+	AuthFQDN    string // from argv[1] or -fqdn; used only for SMTP AUTH
 	Auth        Authenticator
 	TLSConfig   *tls.Config
 	Logger      LogWriter
@@ -54,12 +56,13 @@ func NewServer(cfg *Config) *Server {
 	return d
 }
 
-func (d *Server) newSession(conn net.Conn, env qmail.Env) *session {
+func (d *Server) newSession(ctx context.Context, conn net.Conn, env qmail.Env) *session {
 	var logger LogWriter
 	if d.cfg.Logger != nil {
 		logger = d.cfg.Logger.WithPrefix(env.RemoteIP + ": ")
 	}
 	return &session{
+		ctx:    ctx,
 		SafeIO: safeio.New(conn, logger, d.cfg.Timeout),
 		env:    env,
 	}
@@ -84,10 +87,10 @@ func (d *Server) run(ss *session) error {
 	return err
 }
 
-func (d *Server) Run(conn net.Conn, env qmail.Env) error {
+func (d *Server) Run(ctx context.Context, conn net.Conn, env qmail.Env) error {
 	env.Proto = "ESMTP"
 
-	ss := d.newSession(conn, env)
+	ss := d.newSession(ctx, conn, env)
 	d.dohelo(ss, ss.env.RemoteHost)
 	d.resetAuthorized(ss)
 

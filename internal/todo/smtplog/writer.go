@@ -1,8 +1,7 @@
-package log
+package smtplog
 
 import (
 	"io"
-	"unsafe"
 )
 
 type Writer struct {
@@ -32,7 +31,7 @@ func (l *Writer) WriteByte(c byte) error {
 }
 
 func (l *Writer) WriteString(s string) (int, error) {
-	return l.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+	return l.Write([]byte(s))
 }
 
 func (l *Writer) Flush() error {

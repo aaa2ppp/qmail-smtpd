@@ -1,5 +1,3 @@
-// == smtpd/auth_cram.go ==
-
 package smtpd
 
 import (
@@ -19,7 +17,7 @@ func (h authHandler) cram(ss *session, arg string) (Credentials, error) {
 		return nil, h.malformedInput(ss)
 	}
 
-	challenge := generateCRAMChallenge(h.cfg.Hostname)
+	challenge := generateCRAMChallenge(h.cfg.AuthFQDN)
 	if err := h.challenge(ss, challenge); err != nil {
 		return nil, err
 	}

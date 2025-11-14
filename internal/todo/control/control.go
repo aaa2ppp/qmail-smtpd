@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 var me string

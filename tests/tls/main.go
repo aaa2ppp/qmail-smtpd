@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -11,10 +12,10 @@ import (
 	"time"
 
 	"qmail-smtpd/internal/config"
-	log1 "qmail-smtpd/internal/log"
 	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd"
+	"qmail-smtpd/internal/todo/smtplog"
 )
 
 type Conn struct {
@@ -122,12 +123,14 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+var _ net.Conn = &Conn{}
+
 type logAdapter struct {
-	log1.Writer
+	smtplog.Writer
 }
 
 func (a *logAdapter) WithPrefix(prefix string) smtpd.LogWriter {
-	return &logAdapter{log1.Writer{
+	return &logAdapter{smtplog.Writer{
 		Out:    a.Out,
 		Prefix: a.Prefix + prefix,
 	}}
@@ -170,11 +173,11 @@ func main() {
 
 	cfg := &smtpd.Config{
 		Greeting:  "localhost",
-		Hostname:  "localhost",
+		AuthFQDN:  "localhost",
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
 	}
 	if _, ok := os.LookupEnv("SMTPLOG"); ok {
-		cfg.Logger = &logAdapter{log1.Writer{
+		cfg.Logger = &logAdapter{smtplog.Writer{
 			Out: os.Stderr,
 		}}
 	}
@@ -183,7 +186,7 @@ func main() {
 
 	done := make(chan struct{})
 	go func() {
-		serv.Run(servConn, env)
+		serv.Run(context.Background(), servConn, env)
 		servConn.Close()
 		done <- struct{}{}
 	}()

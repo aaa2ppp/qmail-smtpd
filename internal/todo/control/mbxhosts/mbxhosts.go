@@ -2,14 +2,15 @@ package mbxhosts
 
 import (
 	"net"
-	"qmail-smtpd/internal/constmap"
-	"qmail-smtpd/internal/control"
 	"strings"
+
+	"qmail-smtpd/internal/todo/constmap"
+	"qmail-smtpd/internal/todo/control"
 )
 
 var (
 	hostMap constmap.Constmap
-	at    string
+	at      string
 )
 
 func Init() int {

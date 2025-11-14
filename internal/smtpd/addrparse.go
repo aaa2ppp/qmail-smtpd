@@ -3,7 +3,7 @@ package smtpd
 import (
 	"strings"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 func addrparse(arg string) (string, bool) {

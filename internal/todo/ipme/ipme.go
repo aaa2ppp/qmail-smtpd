@@ -3,7 +3,7 @@ package ipme
 import (
 	"net"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 var ipmeok bool

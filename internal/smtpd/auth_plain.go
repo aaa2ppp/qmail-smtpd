@@ -1,5 +1,3 @@
-// == smtpd/auth_plain.go ==
-
 package smtpd
 
 import (

@@ -1,6 +1,7 @@
 package smtpd
 
 import (
+	"context"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
@@ -20,6 +21,7 @@ type sessionState struct {
 }
 
 type session struct {
+	ctx context.Context
 	*safeio.SafeIO
 	sessionState
 	env qmail.Env

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 func Test_addrparse(t *testing.T) {
@@ -34,7 +34,7 @@ func Test_addrparse(t *testing.T) {
 		},
 		{
 			`[!]TO:<too_long@...>`,
-			`TO:<too_long@` + strings.Repeat("x",900)+ `>`,
+			`TO:<too_long@` + strings.Repeat("x", 900) + `>`,
 			"",
 			false,
 		},
@@ -163,9 +163,11 @@ func Test_addrparse(t *testing.T) {
 }
 
 type alwaysIs struct{}
+
 func (a alwaysIs) Is(scan.IPAddress) bool { return true }
 
 type alwaysNotIs struct{}
+
 func (a alwaysNotIs) Is(scan.IPAddress) bool { return false }
 
 func Test_replaceLocalIP(t *testing.T) {
@@ -183,25 +185,21 @@ func Test_replaceLocalIP(t *testing.T) {
 			"[+] vasya@[192.168.69.69]",
 			args{"vasya@[192.168.69.69]", "example.com", alwaysIs{}},
 			"vasya@example.com",
-
 		},
 		{
 			"[-] vasya@[192.168.69.69]",
 			args{"vasya@[192.168.69.69]", "example.com", alwaysNotIs{}},
 			"vasya@[192.168.69.69]",
-
 		},
 		{
 			"[-] vasya@192.168.69.69",
 			args{"vasya@192.168.69.69", "example.com", alwaysIs{}},
 			"vasya@192.168.69.69",
-
 		},
 		{
 			"[-] vasya@example.org",
 			args{"vasya@example.org", "example.com", alwaysIs{}},
 			"vasya@example.org",
-
 		},
 		// TODO: Add test cases.
 	}

@@ -2,6 +2,7 @@ package smtpd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"reflect"
@@ -10,7 +11,7 @@ import (
 
 	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/qmail"
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 /*
@@ -237,7 +238,7 @@ func createServerAndSessionWithRW(cfg *Config, state sessionState, r *fakeReader
 		Reader: r,
 		Writer: w,
 	}
-	ss := srv.newSession(conn, qmail.Env{})
+	ss := srv.newSession(context.Background(), conn, qmail.Env{})
 	if !reflect.DeepEqual(state, sessionState{}) {
 		ss.sessionState = state
 	}

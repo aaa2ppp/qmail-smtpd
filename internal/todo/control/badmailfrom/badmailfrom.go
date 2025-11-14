@@ -3,8 +3,8 @@ package badmailfrom
 import (
 	"strings"
 
-	"qmail-smtpd/internal/constmap"
-	"qmail-smtpd/internal/control"
+	"qmail-smtpd/internal/todo/constmap"
+	"qmail-smtpd/internal/todo/control"
 )
 
 var mapbmf constmap.Constmap

@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	"qmail-smtpd/internal/scan"
+	"qmail-smtpd/internal/todo/scan"
 )
 
 func main() {

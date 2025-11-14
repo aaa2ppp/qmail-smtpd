@@ -1,5 +1,3 @@
-// == auth/vchkpw.go ==
-
 package auth
 
 import (

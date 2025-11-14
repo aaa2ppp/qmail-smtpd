@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"qmail-smtpd/internal/constmap"
-	"qmail-smtpd/internal/control"
+	"qmail-smtpd/internal/todo/constmap"
+	"qmail-smtpd/internal/todo/control"
 )
 
 var maprh constmap.Constmap

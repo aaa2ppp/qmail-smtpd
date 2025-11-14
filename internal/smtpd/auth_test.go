@@ -1,5 +1,3 @@
-// == smtpd/auth_test.go ==
-
 package smtpd
 
 import (
@@ -424,7 +422,7 @@ func Test_authHandler_cram(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Config{Hostname: "mx.pupkin.org"},
+			&Config{AuthFQDN: "mx.pupkin.org"},
 			sessionState{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
@@ -437,7 +435,7 @@ func Test_authHandler_cram(t *testing.T) {
 		},
 		{
 			"empty argument (=)",
-			&Config{Hostname: "mx.pupkin.org"},
+			&Config{AuthFQDN: "mx.pupkin.org"},
 			sessionState{},
 			args{"="},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
@@ -534,7 +532,7 @@ func TestServer_smtp_auth(t *testing.T) {
 	}{
 		{
 			"login one line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login dmFzeWFAcHVwa2luLm9yZwo="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -543,7 +541,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"login multi line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -552,7 +550,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"login no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			args{"login dmFzeWFAcHVwa2luLm9yZwo="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -561,7 +559,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain single line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo="},
 			"",
@@ -570,7 +568,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain multi line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"plain"},
 			"MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=\r\n",
@@ -579,7 +577,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			args{"plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo="},
 			"",
@@ -588,7 +586,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"cram-md5 tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"cram-md5"},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
@@ -597,7 +595,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"cram-md5 no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{},
 			args{"cram-md5"},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
@@ -606,7 +604,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"argument not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login vasya@pupkin.org"},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -615,7 +613,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"first response not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"vasya@pupkin.org\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -624,7 +622,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"second response not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nmy strong password\r\n",
@@ -633,7 +631,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"canceled on first response",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"*\r\n",
@@ -642,7 +640,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"canceled on second response",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: true}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\n*\r\n",
@@ -651,7 +649,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"authorization failed",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: false}},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -660,7 +658,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"no auth",
-			&Config{Hostname: "localhost", Auth: nil},
+			&Config{AuthFQDN: "localhost", Auth: nil},
 			sessionState{tlsEnabled: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -669,7 +667,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"already authenticated",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: false}},
 			sessionState{tlsEnabled: true, authorized: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -678,7 +676,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"mail transaction",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: false}},
 			sessionState{tlsEnabled: true, seenmail: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
@@ -687,7 +685,7 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"unknown mechanism",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
+			&Config{AuthFQDN: "localhost", Auth: &fakeAuth{ok: false}},
 			sessionState{tlsEnabled: true},
 			args{"unknown"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",

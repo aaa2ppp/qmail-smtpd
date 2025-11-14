@@ -1,5 +1,3 @@
-// == smtpd/auth.go ==
-
 package smtpd
 
 import (
@@ -65,7 +63,7 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 	auth := authHandler{cfg: d.cfg}
 
 	// Preliminary checks
-	if d.cfg.Auth == nil || d.cfg.Hostname == "" {
+	if d.cfg.Auth == nil || d.cfg.AuthFQDN == "" {
 		return ss.out("503 auth not available (#5.3.3)\r\n")
 	}
 	if ss.authorized {
