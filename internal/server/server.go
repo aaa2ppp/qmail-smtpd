@@ -19,27 +19,11 @@ type ConnectionHandler interface {
 	Handle(ctx context.Context, env env.Env, conn net.Conn) error
 }
 
-type Config struct {
-	MaxConnections  int    // -c <num>
-	OverloadMessage []byte // например "421 server too busy\r\n"
-	WriteTimeout    time.Duration
-}
-
 type Server struct {
-	env      env.Env
-	cfg      Config
-	handler  ConnectionHandler
-	listener net.Listener
-	wg       sync.WaitGroup
-}
-
-func New(cfg Config, handler ConnectionHandler) *Server {
-	env := env.New(os.Environ())
-	return &Server{
-		env:     env,
-		cfg:     cfg,
-		handler: handler,
-	}
+	Env            env.Env
+	MaxConnections int // -c <num>
+	Handler        Handler
+	wg             sync.WaitGroup
 }
 
 func (srv *Server) logger() *slog.Logger {
@@ -48,13 +32,16 @@ func (srv *Server) logger() *slog.Logger {
 
 func (srv *Server) Serve(listener net.Listener) error {
 	log := srv.logger().With("op", "Server.Serve")
+	senv := srv.Env
+	if senv == nil {
+		senv = env.New(os.Environ())
+	}
 
 	var sem semaphore
-	if n := srv.cfg.MaxConnections; n > 0 {
+	if n := srv.MaxConnections; n > 0 {
 		sem = makeSemaphore(n)
 	}
 
-	srv.listener = listener
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -65,12 +52,6 @@ func (srv *Server) Serve(listener net.Listener) error {
 		}
 
 		if !sem.acquire() {
-			if srv.cfg.OverloadMessage != nil {
-				if timeout := srv.cfg.WriteTimeout; timeout > 0 {
-					conn.SetWriteDeadline(time.Now().Add(timeout))
-				}
-				conn.Write(srv.cfg.OverloadMessage)
-			}
 			conn.Close()
 			continue
 		}
@@ -91,18 +72,14 @@ func (srv *Server) Serve(listener net.Listener) error {
 
 			ctx := logger.Context(ctx, srv.logger().With("cid", cid))
 
-			if err := srv.handler.Handle(ctx, env, conn); err != nil {
+			if err := srv.Handler.Handle(ctx, env, conn); err != nil {
 				log.Error("handle connection failed", "error", err)
 			}
-		}(srv.env.Clone(), conn)
+		}(senv.Clone(), conn)
 	}
 }
 
-func (srv *Server) Close() error {
-	return srv.listener.Close()
-}
-
-func (srv *Server) Wait(timeout time.Duration) error {
+func (srv *Server) WaitAllConnections(timeout time.Duration) error {
 	done := make(chan struct{})
 	go func() {
 		srv.wg.Wait()

@@ -27,7 +27,7 @@ func (m mockResolver) LookupHost(ctx context.Context, host string) ([]string, er
 	return nil, errors.New("not implemented")
 }
 
-func TestParanoidLookupHosts_Success(t *testing.T) {
+func Test_paranoidCheck_Success(t *testing.T) {
 	r := mockResolver{
 		lookupHostFn: func(ctx context.Context, host string) ([]string, error) {
 			if host == "good.example.com" {
@@ -36,12 +36,11 @@ func TestParanoidLookupHosts_Success(t *testing.T) {
 			return []string{"198.51.100.1"}, nil
 		},
 	}
-	l := lookupCfg{resolver: r}
 
 	hosts := []string{"bad.example.com", "good.example.com"}
 	addr := "192.0.2.1"
 
-	result, err := l.paranoidCheck(context.Background(), hosts, addr)
+	result, err := paranoidCheck(context.Background(), r, hosts, addr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,18 +49,17 @@ func TestParanoidLookupHosts_Success(t *testing.T) {
 	}
 }
 
-func TestParanoidLookupHosts_NoMatch(t *testing.T) {
+func Test_paranoidCheck_NoMatch(t *testing.T) {
 	r := mockResolver{
 		lookupHostFn: func(ctx context.Context, host string) ([]string, error) {
 			return []string{"203.0.113.1"}, nil // не совпадает с addr
 		},
 	}
-	l := lookupCfg{resolver: r}
 
 	hosts := []string{"a.com", "b.com"}
 	addr := "192.0.2.1"
 
-	result, err := l.paranoidCheck(context.Background(), hosts, addr)
+	result, err := paranoidCheck(context.Background(), r, hosts, addr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +68,7 @@ func TestParanoidLookupHosts_NoMatch(t *testing.T) {
 	}
 }
 
-func TestParanoidLookupHosts_ContextCancel(t *testing.T) {
+func Test_paranoidCheck_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // сразу отменяем
 
@@ -80,12 +78,11 @@ func TestParanoidLookupHosts_ContextCancel(t *testing.T) {
 			return nil, ctx.Err()
 		},
 	}
-	l := lookupCfg{resolver: r}
 
 	hosts := []string{"slow.example.com"}
 	addr := "192.0.2.1"
 
-	result, err := l.paranoidCheck(ctx, hosts, addr)
+	result, err := paranoidCheck(ctx, r, hosts, addr)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
@@ -94,7 +91,7 @@ func TestParanoidLookupHosts_ContextCancel(t *testing.T) {
 	}
 }
 
-func TestParanoidLookupHosts_GoroutineLeak(t *testing.T) {
+func Test_paranoidCheck_GoroutineLeak(t *testing.T) {
 	r := mockResolver{
 		lookupHostFn: func(ctx context.Context, host string) ([]string, error) {
 			if host == "host1" {
@@ -104,12 +101,11 @@ func TestParanoidLookupHosts_GoroutineLeak(t *testing.T) {
 			return nil, ctx.Err()
 		},
 	}
-	l := lookupCfg{resolver: r}
 
 	initialGoroutines := runtime.NumGoroutine()
 
 	hosts := []string{"host1", "host2", "host3"}
-	_, _ = l.paranoidCheck(context.Background(), hosts, "192.0.2.1")
+	_, _ = paranoidCheck(context.Background(), r, hosts, "192.0.2.1")
 
 	// Даем время на cleanup
 	time.Sleep(10 * time.Millisecond)
@@ -122,10 +118,10 @@ func TestParanoidLookupHosts_GoroutineLeak(t *testing.T) {
 	}
 }
 
-func TestLookupConnAddrs(t *testing.T) {
+func TestHandler_getHostNames(t *testing.T) {
 	tests := []struct {
 		name     string // description of this test case
-		cfg      lookupCfg
+		handler  Handler
 		resolver Resolver
 		localIP  string
 		remoteIP string
@@ -134,7 +130,7 @@ func TestLookupConnAddrs(t *testing.T) {
 	}{
 		{
 			"lookup success",
-			lookupCfg{lookupRemote: true},
+			Handler{LookupRemote: true},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -153,7 +149,7 @@ func TestLookupConnAddrs(t *testing.T) {
 		},
 		{
 			"lookup success (filterd error)",
-			lookupCfg{lookupRemote: true},
+			Handler{LookupRemote: true},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -172,7 +168,7 @@ func TestLookupConnAddrs(t *testing.T) {
 		},
 		{
 			"lookup failed",
-			lookupCfg{lookupRemote: true},
+			Handler{LookupRemote: true},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -191,7 +187,7 @@ func TestLookupConnAddrs(t *testing.T) {
 		},
 		{
 			"not lookup",
-			lookupCfg{localHost: "my.host", lookupRemote: false},
+			Handler{LocalHost: "my.host", LookupRemote: false},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -210,7 +206,7 @@ func TestLookupConnAddrs(t *testing.T) {
 		},
 		{
 			"paranoid success",
-			lookupCfg{lookupRemote: true, paranoid: true},
+			Handler{LookupRemote: true, Paranoid: true},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -236,7 +232,7 @@ func TestLookupConnAddrs(t *testing.T) {
 		},
 		{
 			"paranoid failed",
-			lookupCfg{lookupRemote: true, paranoid: true},
+			Handler{LookupRemote: true, Paranoid: true},
 			&mockResolver{
 				lookupAddrFn: func(ctx context.Context, addr string) ([]string, error) {
 					switch addr {
@@ -260,9 +256,9 @@ func TestLookupConnAddrs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := tt.cfg
-			l.resolver = tt.resolver
-			got, got2 := l.hostNames(context.Background(), tt.localIP, tt.remoteIP)
+			h := tt.handler
+			h.Resolver = tt.resolver
+			got, got2 := h.getHostNames(context.Background(), tt.localIP, tt.remoteIP)
 			if got != tt.want {
 				t.Errorf("lookupConnAddrs() = %v, want %v", got, tt.want)
 			}
