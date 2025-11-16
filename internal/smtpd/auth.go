@@ -124,7 +124,7 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 func (d *Server) setAuthorized(ss *session, username string) {
 	ss.authorized = true
 	ss.user = username
-	ss.env.RemoteInfo = username
+	ss.env.Set("TCPREMOTEINFO", username)
 	ss.relayclient = ""
 	ss.relayclientok = true
 }
@@ -132,7 +132,6 @@ func (d *Server) setAuthorized(ss *session, username string) {
 func (d *Server) resetAuthorized(ss *session) {
 	ss.authorized = false
 	ss.user = ""
-	ss.env.RemoteInfo = ""
-	ss.relayclient = ss.env.RelayClient
-	ss.relayclientok = ss.env.RelayClientOk
+	ss.env.Unset("TCPREMOTEINFO")
+	ss.relayclient, ss.relayclientok = ss.env.Lookup("RELAYCLIENT")
 }

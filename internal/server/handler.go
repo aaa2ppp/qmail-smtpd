@@ -8,12 +8,12 @@ import (
 	"net"
 	"time"
 
-	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/tcprules"
 )
 
 type Runner interface {
-	Run(context.Context, net.Conn, qmail.Env) error
+	Run(context.Context, net.Conn, env.Env) error
 }
 
 type TCPRules interface {
@@ -58,21 +58,30 @@ func NewHandler(cfg HandlerConfig, runner Runner) *Handler {
 	}
 }
 
-func (h *Handler) Handle(ctx context.Context, conn net.Conn) error {
-
+func (h *Handler) Handle(ctx context.Context, env env.Env, conn net.Conn) error {
 	localIP, err := extractIP(conn.LocalAddr())
 	if err != nil {
 		return fmt.Errorf("can't extract local ip: %w", err)
 	}
+	env.Set("TCPLOCALIP", localIP)
 
 	remoteIP, err := extractIP(conn.RemoteAddr())
 	if err != nil {
 		return fmt.Errorf("can't extract remote ip: %w", err)
 	}
+	env.Set("TCPREMOTEIP", remoteIP)
 
 	localHost, remoteHost := h.lookup.hostNames(ctx, localIP, remoteIP)
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	if localHost != "" {
+		env.Set("TCPLOCALHOST", localHost)
+	}
+
+	if remoteHost != "" {
+		env.Set("TCPREMOTEHOST", remoteHost)
 	}
 
 	rule, err := h.rules.GetByIPHost(remoteIP, remoteHost)
@@ -89,17 +98,7 @@ func (h *Handler) Handle(ctx context.Context, conn net.Conn) error {
 		return nil
 	}
 
-	env := qmail.Env{
-		LocalIP:    cmp.Or(rule.Env["TCPLOCALIP"], localIP),
-		LocalHost:  cmp.Or(rule.Env["TCPLOCALHOST"], localHost),
-		RemoteIP:   cmp.Or(rule.Env["TCPREMOTEIP"], remoteIP),
-		RemoteHost: cmp.Or(rule.Env["TCPREMOTEHOST"], remoteHost),
-	}
-
-	if v, ok := rule.Env["RELAYCLIENT"]; ok {
-		env.RelayClient = v
-		env.RelayClientOk = ok
-	}
+	env.Copy(rule.Env)
 
 	return h.runner.Run(ctx, conn, env)
 }

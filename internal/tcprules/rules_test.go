@@ -2,6 +2,7 @@ package tcprules
 
 import (
 	"errors"
+	"qmail-smtpd/internal/env"
 	"reflect"
 	"testing"
 )
@@ -32,11 +33,11 @@ func TestTCPRules_getByIPPrefixes(t *testing.T) {
 		ip string
 	}
 	tests := []struct {
-		name       string
-		dbData     map[string]string
-		args       args
-		wantRule   string
-		wantErr    error
+		name     string
+		dbData   map[string]string
+		args     args
+		wantRule string
+		wantErr  error
 	}{
 		{
 			name: "find longest prefix",
@@ -120,11 +121,11 @@ func TestTCPRules_getByHostSuffixes(t *testing.T) {
 		fqdn string
 	}
 	tests := []struct {
-		name       string
-		dbData     map[string]string
-		args       args
-		wantRule   string
-		wantErr    error
+		name     string
+		dbData   map[string]string
+		args     args
+		wantRule string
+		wantErr  error
 	}{
 		{
 			name: "find longest suffix",
@@ -238,7 +239,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "allowed"},
+				Env:   env.New([]string{"HOST=allowed"}),
 			},
 			wantErr: nil,
 		},
@@ -251,7 +252,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"NET": "internal"},
+				Env:   env.New([]string{"NET=internal"}),
 			},
 			wantErr: nil,
 		},
@@ -264,7 +265,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "sub.example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"TLD": "allowed"},
+				Env:   env.New([]string{"TLD=allowed"}),
 			},
 			wantErr: nil,
 		},
@@ -277,7 +278,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "sub.example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"DEFAULT_HOST": "1"},
+				Env:   env.New([]string{"DEFAULT_HOST=1"}),
 			},
 			wantErr: nil,
 		},
@@ -290,7 +291,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "sub.example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"DEFAULT": "1"},
+				Env:   env.New([]string{"DEFAULT=1"}),
 			},
 			wantErr: nil,
 		},
@@ -299,13 +300,13 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			name: "No host provided",
 			dbData: map[string]string{
 				"192.168.1.100": "+USER=local\x00",
-				"192.168.1.":   "+NET=internal\x00",
+				"192.168.1.":    "+NET=internal\x00",
 				"=example.com":  "+HOST=allowed\x00", // Should not be found
 			},
 			args: args{ip: "192.168.1.100", host: ""},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"USER": "local"},
+				Env:   env.New([]string{"USER=local"}),
 			},
 			wantErr: nil,
 		},
@@ -313,7 +314,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			// 8. No rules found
 			name: "No rules found",
 			dbData: map[string]string{
-				"10.0.0.1": "+NET=other\x00",
+				"10.0.0.1":   "+NET=other\x00",
 				"=other.com": "+HOST=other\x00",
 			},
 			args:       args{ip: "192.168.1.100", host: "example.com"},
@@ -329,7 +330,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "", host: "example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "allowed"},
+				Env:   env.New([]string{"HOST=allowed"}),
 			},
 			wantErr: nil,
 		},
@@ -342,7 +343,7 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 			args: args{ip: "192.168.1.100", host: "example.com"},
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{"NET": "internal"},
+				Env:   env.New([]string{"NET=internal"}),
 			},
 			wantErr: nil,
 		},
@@ -359,24 +360,15 @@ func TestTCPRules_GetByIPHost(t *testing.T) {
 				return
 			}
 			if err == nil {
-				if result.Allow != tt.wantResult.Allow {
-					t.Errorf("GetByIPHost() Allow = %v, want %v", result.Allow, tt.wantResult.Allow)
-				}
-				if len(result.Env) != len(tt.wantResult.Env) {
-					t.Errorf("GetByIPHost() Env length = %d, want %d", len(result.Env), len(tt.wantResult.Env))
-				}
-				for key, wantValue := range tt.wantResult.Env {
-					gotValue, exists := result.Env[key]
-					if !exists || gotValue != wantValue {
-						t.Errorf("GetByIPHost() Env[%s] = %v, want %v", key, gotValue, wantValue)
-					}
+				if !reflect.DeepEqual(result, tt.wantResult) {
+					t.Errorf("Get() result = %v, want %v", result, tt.wantResult)
 				}
 			}
 		})
 	}
 }
 
-func TestTCPRules_Get(t *testing.T) {
+func TestTCPRules_GetByIP(t *testing.T) {
 	tests := []struct {
 		name       string
 		dbData     map[string]string
@@ -404,10 +396,10 @@ func TestTCPRules_Get(t *testing.T) {
 			ip: "192.168.1.100",
 			wantResult: Result{
 				Allow: true,
-				Env: map[string]string{
-					"USER": "test",
-					"ROLE": "admin",
-				},
+				Env: env.New([]string{
+					"USER=test",
+					"ROLE=admin",
+				}),
 			},
 			wantErr: nil,
 		},
@@ -419,7 +411,7 @@ func TestTCPRules_Get(t *testing.T) {
 			ip: "192.168.1.100",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -431,7 +423,7 @@ func TestTCPRules_Get(t *testing.T) {
 			ip: "192.168.1.100",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -443,7 +435,7 @@ func TestTCPRules_Get(t *testing.T) {
 			ip: "192.168.1.100",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -468,9 +460,9 @@ func TestTCPRules_Get(t *testing.T) {
 			ip: "192.168.1.100",
 			wantResult: Result{
 				Allow: true,
-				Env: map[string]string{
-					"NETWORK": "internal",
-				},
+				Env: env.New([]string{
+					"NETWORK=internal",
+				}),
 			},
 			wantErr: nil,
 		},
@@ -519,19 +511,8 @@ func TestTCPRules_Get(t *testing.T) {
 			}
 
 			if err == nil {
-				if result.Allow != tt.wantResult.Allow {
-					t.Errorf("Get() Allow = %v, want %v", result.Allow, tt.wantResult.Allow)
-				}
-
-				if len(result.Env) != len(tt.wantResult.Env) {
-					t.Errorf("Get() Env length = %d, want %d", len(result.Env), len(tt.wantResult.Env))
-				}
-
-				for key, wantValue := range tt.wantResult.Env {
-					gotValue, exists := result.Env[key]
-					if !exists || gotValue != wantValue {
-						t.Errorf("Get() Env[%s] = %v, want %v", key, gotValue, wantValue)
-					}
+				if !reflect.DeepEqual(result, tt.wantResult) {
+					t.Errorf("Get() result = %v, want %v", result, tt.wantResult)
 				}
 			}
 		})
@@ -559,10 +540,10 @@ func TestParseRule(t *testing.T) {
 			rule: "+USER=test\x00+ROLE=admin\x00",
 			wantResult: Result{
 				Allow: true,
-				Env: map[string]string{
-					"USER": "test",
-					"ROLE": "admin",
-				},
+				Env: env.New([]string{
+					"USER=test",
+					"ROLE=admin",
+				}),
 			},
 			wantErr: nil,
 		},
@@ -571,7 +552,7 @@ func TestParseRule(t *testing.T) {
 			rule: "",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -580,7 +561,7 @@ func TestParseRule(t *testing.T) {
 			rule: "\x00",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -589,7 +570,7 @@ func TestParseRule(t *testing.T) {
 			rule: "\x00\x00",
 			wantResult: Result{
 				Allow: true,
-				Env:   map[string]string{},
+				Env:   env.New(nil),
 			},
 			wantErr: nil,
 		},
@@ -619,9 +600,9 @@ func TestParseRule(t *testing.T) {
 			rule: "+USER=\x00",
 			wantResult: Result{
 				Allow: true,
-				Env: map[string]string{
-					"USER": "",
-				},
+				Env: env.New([]string{
+					"USER=",
+				}),
 			},
 			wantErr: nil,
 		},
@@ -637,18 +618,9 @@ func TestParseRule(t *testing.T) {
 			}
 
 			if err == nil {
-				if result.Allow != tt.wantResult.Allow {
-					t.Errorf("parseRule() Allow = %v, want %v", result.Allow, tt.wantResult.Allow)
-				}
-
-				if len(result.Env) != len(tt.wantResult.Env) {
-					t.Errorf("parseRule() Env length = %d, want %d", len(result.Env), len(tt.wantResult.Env))
-				}
-
-				for key, wantValue := range tt.wantResult.Env {
-					gotValue, exists := result.Env[key]
-					if !exists || gotValue != wantValue {
-						t.Errorf("parseRule() Env[%s] = %v, want %v", key, gotValue, wantValue)
+				if err == nil {
+					if !reflect.DeepEqual(result, tt.wantResult) {
+						t.Errorf("parseRule() result = %v, want %v", result, tt.wantResult)
 					}
 				}
 			}
@@ -676,7 +648,7 @@ func TestTCPRules_Get_Priority(t *testing.T) {
 			"192.168.1.100",
 			Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "specific"},
+				Env:   env.New([]string{"HOST=specific"}),
 			},
 		},
 		{
@@ -684,7 +656,7 @@ func TestTCPRules_Get_Priority(t *testing.T) {
 			"192.168.1.101",
 			Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "subnet1"},
+				Env:   env.New([]string{"HOST=subnet1"}),
 			},
 		},
 		{
@@ -692,7 +664,7 @@ func TestTCPRules_Get_Priority(t *testing.T) {
 			"192.168.2.100",
 			Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "subnet2"},
+				Env:   env.New([]string{"HOST=subnet2"}),
 			},
 		},
 		{
@@ -700,7 +672,7 @@ func TestTCPRules_Get_Priority(t *testing.T) {
 			"192.169.1.100",
 			Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "subnet3"},
+				Env:   env.New([]string{"HOST=subnet3"}),
 			},
 		},
 		{
@@ -708,7 +680,7 @@ func TestTCPRules_Get_Priority(t *testing.T) {
 			"193.168.1.100",
 			Result{
 				Allow: true,
-				Env:   map[string]string{"HOST": "default"},
+				Env:   env.New([]string{"HOST=default"}),
 			},
 		},
 	}

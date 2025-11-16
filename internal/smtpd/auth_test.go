@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
@@ -706,6 +707,7 @@ func TestServer_smtp_auth(t *testing.T) {
 				Writer: w,
 			}
 			ss := &session{
+				env:          env.New(nil),
 				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
 				sessionState: tt.state,
 			}

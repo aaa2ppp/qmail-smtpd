@@ -2,7 +2,7 @@ package smtpd
 
 import (
 	"context"
-	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
 
@@ -22,9 +22,14 @@ type sessionState struct {
 
 type session struct {
 	ctx context.Context
+	env env.Env
 	*safeio.SafeIO
+	proto      string
+	local      string
+	remoteIP   string
+	remoteHost string
+	databytes  int
 	sessionState
-	env qmail.Env
 }
 
 func (ss *session) out(s string) error {

@@ -3,7 +3,7 @@ package interfaces
 import (
 	"io"
 
-	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/todo/scan"
 )
 
@@ -16,7 +16,7 @@ type IPMe interface {
 }
 
 type Qmail interface {
-	Begin(mailForm string, rcptTo []string, opts qmail.Env) (Queue, error)
+	Begin(mailForm string, rcptTo []string, env env.Env) (Queue, error)
 }
 
 type Queue interface {

@@ -1,17 +1,21 @@
 package smtpd
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
-	"qmail-smtpd/internal/qmail"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/smtpd/interfaces"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
+
+const proto = "ESMTP"
 
 type (
 	AddrMatcher = interfaces.AddrMatcher
@@ -56,22 +60,42 @@ func NewServer(cfg *Config) *Server {
 	return d
 }
 
-func (d *Server) newSession(ctx context.Context, conn net.Conn, env qmail.Env) *session {
-	var logger LogWriter
+func (d *Server) newSession(ctx context.Context, conn net.Conn, env env.Env) *session {
+	env.Set("PROTO", proto)
+
+	var ioLogger LogWriter
 	if d.cfg.Logger != nil {
-		logger = d.cfg.Logger.WithPrefix(env.RemoteIP + ": ")
+		ioLogger = d.cfg.Logger.WithPrefix(conn.RemoteAddr().String() + ": ")
 	}
+	io := safeio.New(conn, ioLogger, d.cfg.Timeout)
+
+	// RFC требует FQDN или адрес, но для идентификации хоста предпочтительно FQDN.
+	local := cmp.Or(env.Get("TCPLOCALHOST"), env.Get("TCPLOCALIP"), "unknown")
+
+	remoteIP := cmp.Or(env.Get("TCPREMOTEIP"), "unknown")
+	remoteHost := cmp.Or(env.Get("TCPREMOTEHOST"), "unknown")
+
+	databytes := d.cfg.Databytes
+	if v, err := strconv.Atoi(env.Get("DATABYTES")); err == nil && v >= 0 {
+		databytes = v
+	}
+
 	return &session{
-		ctx:    ctx,
-		SafeIO: safeio.New(conn, logger, d.cfg.Timeout),
-		env:    env,
+		ctx:        ctx,
+		env:        env,
+		SafeIO:     io,
+		proto:      proto,
+		local:      local,
+		remoteIP:   remoteIP,
+		remoteHost: remoteHost,
+		databytes:  databytes,
 	}
 }
 
 func (d *Server) run(ss *session) error {
 	d.smtp_greet(ss, "220 ")
 	ss.out(" ")
-	ss.out(ss.env.Proto)
+	ss.out(ss.proto)
 	ss.out("\r\n")
 	// TODO: здесь нужен Flush()?
 
@@ -87,12 +111,9 @@ func (d *Server) run(ss *session) error {
 	return err
 }
 
-func (d *Server) Run(ctx context.Context, conn net.Conn, env qmail.Env) error {
-	env.Proto = "ESMTP"
-
+func (d *Server) Run(ctx context.Context, conn net.Conn, env env.Env) error {
 	ss := d.newSession(ctx, conn, env)
-	d.dohelo(ss, ss.env.RemoteHost)
+	d.dohelo(ss, ss.remoteHost)
 	d.resetAuthorized(ss)
-
 	return d.run(ss)
 }

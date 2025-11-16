@@ -23,7 +23,7 @@ func (d *Server) smtp_quit(ss *session, _ string) error {
 
 func (d *Server) dohelo(ss *session, arg string) {
 	ss.helohost = arg
-	if !strings.EqualFold(ss.env.RemoteHost, ss.helohost) {
+	if !strings.EqualFold(ss.remoteHost, ss.helohost) {
 		ss.fakehelo = ss.helohost
 	}
 }

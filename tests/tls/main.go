@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"qmail-smtpd/internal/config"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/pipeconn"
-	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd"
 	"qmail-smtpd/internal/todo/smtplog"
 )
@@ -164,12 +164,12 @@ func main() {
 		log.Fatalf("LoadX509KeyPair: %v", err)
 	}
 
-	env := qmail.Env{
-		LocalIP:    "127.0.0.1",
-		LocalHost:  "localhost",
-		RemoteIP:   "127.0.0.1",
-		RemoteHost: "localhost",
-	}
+	env := env.New([]string{
+		"TCPLOCALIP=127.0.0.1",
+		"TCPLOCALHOST=localhost",
+		"TCPREMOTEIP=127.0.0.1",
+		"TCPREMOTEHOST=localhost",
+	})
 
 	cfg := &smtpd.Config{
 		Greeting:  "localhost",

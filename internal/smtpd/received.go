@@ -42,32 +42,24 @@ func safeput(qqt Queue, s string) {
 /* "Received: from relay1.uu.net (HELO uunet.uu.net) (7@192.48.96.5)\n" */
 /* "  by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000\n" */
 
-func received(
-	qqt Queue,
-	protocol string,
-	local string,
-	remoteip string,
-	remotehost string,
-	remoteinfo string,
-	helo string,
-) error {
+func (d *Server) received(qqt Queue, ss *session) error {
 	qqt.WriteString("Received: from ")
-	safeput(qqt, remotehost)
-	if helo != "" {
+	safeput(qqt, ss.remoteHost)
+	if ss.helohost != "" {
 		qqt.WriteString(" (HELO ")
-		safeput(qqt, helo)
+		safeput(qqt, ss.helohost)
 		qqt.WriteString(")")
 	}
 	qqt.WriteString(" (")
-	if remoteinfo != "" {
-		safeput(qqt, remoteinfo)
+	if ss.user != "" {
+		safeput(qqt, ss.user)
 		qqt.WriteString("@")
 	}
-	safeput(qqt, remoteip)
+	safeput(qqt, ss.remoteIP)
 	qqt.WriteString(")\n  by ")
-	safeput(qqt, local)
+	safeput(qqt, ss.local)
 	qqt.WriteString(" with ")
-	qqt.WriteString(protocol)
+	qqt.WriteString(ss.proto)
 	qqt.WriteString("; ")
 	dt := time.Now()
 	qqt.WriteString(dt.Format("2 Jan 2006 15:04:05 -0700"))

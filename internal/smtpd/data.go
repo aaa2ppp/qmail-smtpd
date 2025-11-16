@@ -48,19 +48,9 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 	}
 	ss.Flush()
 
-	// TODO: Возможно, 'received' стоит сделать методом структуры, чтобы скрыть сложность параметров.
-	received(
-		qqt,
-		ss.env.Proto,
-		// RFC требует FQDN или адрес, но для идентификации хоста предпочтительно FQDN.
-		cmp.Or(ss.env.LocalHost, ss.env.LocalIP),
-		ss.env.RemoteIP,
-		ss.env.RemoteHost,
-		ss.env.RemoteInfo,
-		ss.fakehelo,
-	)
+	d.received(qqt, ss)
 
-	_, blastErr := d.blast(qqt, ss, ss.env.Databytes)
+	_, blastErr := d.blast(qqt, ss, ss.databytes)
 	if blastErr == ErrStrayNewLine {
 		return d.straynewline(ss)
 	}

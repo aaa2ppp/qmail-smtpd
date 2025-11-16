@@ -9,8 +9,8 @@ import (
 
 	"qmail-smtpd/internal/auth"
 	"qmail-smtpd/internal/config"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/pipeconn"
-	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd"
 	"qmail-smtpd/internal/todo"
 )
@@ -34,31 +34,18 @@ func main() {
 
 	smtpd := smtpd.NewServer(cfg)
 
-	env := qmail.Env{
-		LocalIP:    os.Getenv("TCPLOCALIP"),
-		LocalHost:  os.Getenv("TCPLOCALHOST"),
-		RemoteIP:   os.Getenv("TCPREMOTEIP"),
-		RemoteHost: os.Getenv("TCPREMOTEHOST"),
-		QmailQueue: os.Getenv("QMAILQUEUE"),
-	}
-
-	if s, ok := os.LookupEnv("RELAYCLIENT"); ok {
-		env.RelayClient = s
-		env.RelayClientOk = ok
-	}
-
-	if env.LocalIP == "" {
-		log.Fatal("TCPLOCALIP must be defined")
-	}
-	if env.RemoteIP == "" {
-		log.Fatal("TCPREMOTEIP must be defined")
+	env := env.New(os.Environ())
+	for _, name := range []string{"TCPLOCALIP", "TCPREMOTEIP"} {
+		if env.Get(name) == "" {
+			log.Fatalf("%s must be defined", name)
+		}
 	}
 
 	conn := &pipeconn.Conn{
 		Reader:   os.Stdin,
 		Writer:   os.Stdout,
-		LocalIP:  pipeconn.Addr(env.LocalIP),
-		RemoteIP: pipeconn.Addr(env.RemoteIP),
+		LocalIP:  pipeconn.Addr(env.Get("TCPLOCALIP")),
+		RemoteIP: pipeconn.Addr(env.Get("TCPREMOTEIP")),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

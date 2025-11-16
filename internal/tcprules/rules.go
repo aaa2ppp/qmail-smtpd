@@ -3,6 +3,7 @@ package tcprules
 import (
 	"errors"
 	"io"
+	"qmail-smtpd/internal/env"
 	"strings"
 )
 
@@ -159,7 +160,7 @@ func ParseBinRule(data string) (Result, error) {
 	// 	data += next0; datalen -= next0;
 	// }
 
-	env := map[string]string{}
+	env := env.New(nil)
 
 	for len(data) > 0 {
 		next0 := strings.IndexByte(data, 0)
@@ -183,9 +184,7 @@ func ParseBinRule(data string) (Result, error) {
 			if split == -1 {
 				return Result{}, ErrInvalidFormat
 			}
-			key := string(chunk[:split])
-			value := string(chunk[split+1:])
-			env[key] = value
+			env.Append(chunk)
 		default:
 			return Result{}, ErrInvalidFormat
 		}

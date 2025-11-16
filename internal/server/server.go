@@ -6,15 +6,17 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"os"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/logger"
 )
 
 type ConnectionHandler interface {
-	Handle(ctx context.Context, conn net.Conn) error
+	Handle(ctx context.Context, env env.Env, conn net.Conn) error
 }
 
 type Config struct {
@@ -24,6 +26,7 @@ type Config struct {
 }
 
 type Server struct {
+	env      env.Env
 	cfg      Config
 	handler  ConnectionHandler
 	listener net.Listener
@@ -31,7 +34,9 @@ type Server struct {
 }
 
 func New(cfg Config, handler ConnectionHandler) *Server {
+	env := env.New(os.Environ())
 	return &Server{
+		env:     env,
 		cfg:     cfg,
 		handler: handler,
 	}
@@ -71,7 +76,7 @@ func (srv *Server) Serve(listener net.Listener) error {
 		}
 
 		srv.wg.Add(1)
-		go func(conn net.Conn) {
+		go func(env env.Env, conn net.Conn) {
 			cid := rand.Int64()
 			log := log.With("cid", cid)
 
@@ -86,10 +91,10 @@ func (srv *Server) Serve(listener net.Listener) error {
 
 			ctx := logger.Context(ctx, srv.logger().With("cid", cid))
 
-			if err := srv.handler.Handle(ctx, conn); err != nil {
+			if err := srv.handler.Handle(ctx, env, conn); err != nil {
 				log.Error("handle connection failed", "error", err)
 			}
-		}(conn)
+		}(srv.env.Clone(), conn)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/smtpd"
 	"qmail-smtpd/internal/todo/control"
@@ -21,7 +22,7 @@ import (
 
 type qmailAdapter struct{}
 
-func (qa qmailAdapter) Begin(fromMail string, rcptTo []string, env qmail.Env) (smtpd.Queue, error) {
+func (qa qmailAdapter) Begin(fromMail string, rcptTo []string, env env.Env) (smtpd.Queue, error) {
 	return qmail.Begin(fromMail, rcptTo, env)
 }
 

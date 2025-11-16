@@ -1,7 +1,9 @@
 package smtpd
 
 import (
-	"qmail-smtpd/internal/qmail"
+	"context"
+	"qmail-smtpd/internal/env"
+	"qmail-smtpd/internal/pipeconn"
 	"reflect"
 	"testing"
 	"time"
@@ -343,9 +345,6 @@ quit
 		{
 			"data - ok",
 			&Config{
-				// LocalHost:  "mx.pupkin.org",
-				// RemoteIP:   "192.168.69.69",
-				// RemoteHost: "vasya.pupkin.org",
 				Qmail: &fakeQueue{},
 			},
 			sessionState{},
@@ -366,9 +365,6 @@ quit
 		{
 			"data - no CR",
 			&Config{
-				// LocalHost:  "mx.pupkin.org",
-				// RemoteIP:   "192.168.69.69",
-				// RemoteHost: "vasya.pupkin.org",
 				Qmail: &fakeQueue{},
 			},
 			sessionState{},
@@ -390,16 +386,24 @@ quit
 	}
 
 	// xxx
-	env := qmail.Env{
-		LocalHost:  "mx.pupkin.org",
-		RemoteIP:   "192.168.69.69",
-		RemoteHost: "vasya.pupkin.org",
-	}
+	env := env.New([]string{
+		"TCPLOCALHOST=mx.pupkin.org",
+		"TCPREMOTEIP=192.168.69.69",
+		"REMOTEHOST=vasya.pupkin.org",
+	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, ss := createServerAndSessionWithRW(tt.cfg, tt.state, tt.r, tt.w)
-			ss.env = env
+			srv := NewServer(tt.cfg)
+			conn := &pipeconn.Conn{
+				Reader: tt.r,
+				Writer: tt.w,
+			}
+			ss := srv.newSession(context.Background(), conn, env)
+			ss.sessionState = tt.state
+
+			// srv, ss := createServerAndSessionWithRW(tt.cfg, tt.state, tt.r, tt.w)
+			// ss.env = env
 			alreadyShowed := false
 
 			if err := srv.run(ss); (err != nil) != tt.wantErr {

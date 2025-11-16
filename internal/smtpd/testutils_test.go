@@ -2,14 +2,12 @@ package smtpd
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
-	"qmail-smtpd/internal/pipeconn"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/qmail"
 	"qmail-smtpd/internal/todo/scan"
 )
@@ -134,7 +132,7 @@ type fakeQueue struct {
 	commitErr  error
 }
 
-func (qq *fakeQueue) Begin(mailForm string, rcptTo []string, opts qmail.Env) (Queue, error) {
+func (qq *fakeQueue) Begin(mailForm string, rcptTo []string, env env.Env) (Queue, error) {
 	if qq.beginErr != nil {
 		return nil, qq.beginErr
 	}
@@ -230,19 +228,6 @@ func delCr(s string) string {
 		}
 	}
 	return strings.Join(a, "\n")
-}
-
-func createServerAndSessionWithRW(cfg *Config, state sessionState, r *fakeReader, w *fakeWriter) (*Server, *session) {
-	srv := NewServer(cfg)
-	conn := &pipeconn.Conn{
-		Reader: r,
-		Writer: w,
-	}
-	ss := srv.newSession(context.Background(), conn, qmail.Env{})
-	if !reflect.DeepEqual(state, sessionState{}) {
-		ss.sessionState = state
-	}
-	return srv, ss
 }
 
 // checkMsgID validates that s is a valid msg-id per RFC 5322.

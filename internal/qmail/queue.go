@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"qmail-smtpd/internal/env"
 )
 
 const qmailQueueCmd = "bin/qmail-queue"
@@ -71,7 +73,7 @@ func (qt *Queue) WriteString(s string) (int, error) {
 //
 // On non-zero exit code from qmail-queue, the error is mapped to *PermanentError
 // or *TemporaryError using the original qmail logic.
-func Begin(mailFrom string, rcptTo []string, env Env) (qt *Queue, err error) {
+func Begin(mailFrom string, rcptTo []string, env env.Env) (qt *Queue, err error) {
 	var (
 		queue    *exec.Cmd
 		message  *os.File
@@ -89,7 +91,7 @@ func Begin(mailFrom string, rcptTo []string, env Env) (qt *Queue, err error) {
 		}
 	}()
 
-	binpath := cmp.Or(env.QmailQueue, qmailQueueCmd)
+	binpath := cmp.Or(env.Get("QMAILQUEUE"), qmailQueueCmd)
 	queue = exec.Command(binpath)
 
 	// message pipe
@@ -109,7 +111,7 @@ func Begin(mailFrom string, rcptTo []string, env Env) (qt *Queue, err error) {
 	queue.Stdout, envelope = er, ew // yes, qmail-queue reads from fd=1 (stdout)
 
 	queue.Stderr = os.Stderr
-	queue.Env = env.Prepare()
+	queue.Env = env.Environ()
 
 	if err := queue.Start(); err != nil {
 		return nil, err
