@@ -101,3 +101,6 @@ qmail-test-tls: $(AUTO_QMAIL)/bin/safeout
 
 qmail-test-tcprules: $(AUTO_QMAIL)/bin/tcprules
 	AUTO_QMAIL=$(AUTO_QMAIL) sh ./tests/tcprules/test.sh
+
+qmail-test-env:
+	sh ./tests/env/test.sh

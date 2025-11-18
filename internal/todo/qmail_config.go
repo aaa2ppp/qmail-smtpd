@@ -143,8 +143,10 @@ func LoadQmailConfig() (*smtpd.Config, error) {
 	cfg.Qmail = qmailAdapter{}
 
 	cert, err := tls.LoadX509KeyPair("control/servercert.pem", "control/servercert.pem")
-	if err != nil {
-		log.Fatal(err)
+	if err == nil {
+		cfg.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	} else {
+		log.Printf("TLSConfig: %v", err)
 	}
 
 	cfg.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}

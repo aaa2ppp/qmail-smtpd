@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -70,14 +71,28 @@ func main() {
 
 	slog.SetDefault(todo.NewLogger())
 
-	var tcpRules *tcprules.Rules
+	var tcpRules server.TCPRules
 	if *rulesFile != "" {
+		log.Printf("open %s", *rulesFile)
 		db, err := cdb.Open(*rulesFile)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer db.Close()
 		tcpRules = tcprules.New(cdbAdapter{db})
+	}
+
+	var (
+		vchkpwPath string
+		vchkpwArgs []string
+	)
+	if args := flag.Args(); len(args) > 0 {
+		if p, err := filepath.Abs(args[0]); err == nil {
+			vchkpwPath = p
+		} else {
+			log.Fatal(err)
+		}
+		vchkpwArgs = args[1:]
 	}
 
 	if err := os.Chdir(config.AutoQmail); err != nil {
@@ -89,14 +104,14 @@ func main() {
 		log.Fatalf("can't load qmail config: %v", err)
 	}
 
-	if args := flag.Args(); len(args) > 0 {
+	if vchkpwPath != "" {
 		if *authFQDN != "" {
 			cfg.AuthFQDN = *authFQDN
 		}
-		cfg.Auth = auth.NewVchkpwCommand(args[0], args[1:]...)
+		cfg.Auth = auth.NewVchkpwCommand(vchkpwPath, vchkpwArgs...)
 	}
 
-	smtpd := smtpd.NewServer(cfg)
+	smtpd := smtpdAdapter{smtpd.NewServer(cfg)}
 
 	handler := server.Handler{
 		LocalHost:     cfg.Me,
@@ -104,7 +119,7 @@ func main() {
 		LookupTimeout: 10 * time.Second,
 		Paranoid:      *paranoid,
 		TCPRules:      tcpRules,
-		Handler:       smtpdAdapter{smtpd},
+		Handler:       smtpd,
 	}
 
 	server := server.Server{
@@ -112,6 +127,7 @@ func main() {
 		Handler:        handler,
 	}
 
+	log.Printf("server listen at %s", *serverAddr)
 	listner, err := net.Listen("tcp", *serverAddr)
 	if err != nil {
 		log.Fatal(err)

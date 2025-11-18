@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"qmail-smtpd/internal/logger"
 	"qmail-smtpd/internal/qmail"
 )
 
@@ -38,6 +39,7 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 
 	qqt, err := d.cfg.Qmail.Begin(ss.mailfrom, ss.rcptto, ss.env)
 	if err != nil {
+		logger.FromContext(ss.ctx).Error("qmail.Begin", "error", err)
 		return d.err_qqt(ss)
 	}
 	defer qqt.Rollback()
