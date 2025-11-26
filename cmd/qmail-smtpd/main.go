@@ -1,218 +1,258 @@
 package main
 
 import (
-	"cmp"
+	"context"
 	"crypto/tls"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
+	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"qmail-smtpd/internal/auth"
+	"qmail-smtpd/internal/cdb"
 	"qmail-smtpd/internal/config"
 	"qmail-smtpd/internal/control"
-	"qmail-smtpd/internal/control/badmailfrom"
-	"qmail-smtpd/internal/control/mbxhosts"
-	"qmail-smtpd/internal/control/rcpthosts"
-	"qmail-smtpd/internal/ipme"
-	log1 "qmail-smtpd/internal/log"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/qmail"
-	"qmail-smtpd/internal/scan"
 	"qmail-smtpd/internal/smtpd"
+	"qmail-smtpd/internal/smtpd/filters"
+	"qmail-smtpd/internal/tcprules"
+	"qmail-smtpd/internal/tcpserver"
 )
 
-type qmailAdapter struct{}
+type cdbAdapter struct{ cdb *cdb.CDB }
 
-func (qa qmailAdapter) Begin(fromMail string, rcptTo []string, env qmail.Env) (smtpd.Queue, error) {
-	return qmail.Begin(fromMail, rcptTo, env)
+func (c cdbAdapter) Do(fn func(tcprules.Getter) error) error {
+	return c.cdb.Do(func(q *cdb.Query) error { return fn(q) })
 }
 
-type rcpthostsAdapter struct{}
+var (
+	localHost    = flag.String("l", "", "localhost name")
+	rulesFile    = flag.String("x", "", "tcp rules file")
+	lookupRemote = flag.Bool("h", false, "lookup remote host name")
+	paranoid     = flag.Bool("p", false, "paranoid check remote host name")
+	maxConns     = flag.Int("c", 0, "maximum connections")
+	serverAddr   = flag.String("addr", "", "addres to bind server")
+	authFQDN     = flag.String("fqdn", "", "used only for SMTP AUTH (default control/localiphost)")
+	helpLong     = flag.Bool("help", false, "Show this help message")
+)
 
-func (a rcpthostsAdapter) Match(addr string) bool {
-	return rcpthosts.Match(addr)
-}
-
-type badmailfromAdapter struct{}
-
-func (a badmailfromAdapter) Match(addr string) bool {
-	return badmailfrom.Match(addr)
-}
-
-type mbxhostsAdapter struct{}
-
-func (a mbxhostsAdapter) Match(addr string) bool {
-	return mbxhosts.Match(addr)
-}
-
-type ipmeAdapter struct{}
-
-func (a ipmeAdapter) Is(ip scan.IPAddress) bool {
-	return ipme.Is(ip)
-}
-
-type logAdapter struct {
-	log1.Writer
-}
-
-func (a *logAdapter) WithPrefix(prefix string) smtpd.LogWriter {
-	return &logAdapter{log1.Writer{
-		Out:    a.Out,
-		Prefix: a.Prefix + prefix,
-	}}
+func usage() {
+	out := flag.CommandLine.Output()
+	fmt.Fprintf(out, `Usage as cli:
+  %[1]s [AUTH_FQDN AUTH_PROG AUTH_OPTIONS]
+Usage as server:
+  %[1]s --addr=<HOST:PORT> [OPTIONS] [AUTH_PROG AUTH_OPTIONS]
+Options:
+`, filepath.Base(os.Args[0]))
+	flag.PrintDefaults()
 }
 
 func main() {
-	// void sig_pipeignore() { sig_catch(SIGPIPE,SIG_IGN); }
+	flag.Usage = usage
+	flag.Parse()
+
+	if *helpLong {
+		usage()
+		return
+	}
+
+	if *serverAddr != "" {
+		runServer()
+	} else {
+		runCLI()
+	}
+}
+
+func runCLI() {
 	signal.Ignore(syscall.SIGPIPE)
 
 	if err := os.Chdir(config.AutoQmail); err != nil {
 		log.Fatal(err)
 	}
 
-	cfg := prepareConfig()
-	if len(os.Args) > 1 {
-		cfg.Hostname = os.Args[1]
-		path := os.Args[1]
-		args := os.Args[2:]
-		cfg.Auth = auth.NewVchkpwCommand(path, args...)
+	smtpdCfg, err := buildSMTPServerConfig()
+	if err != nil {
+		log.Fatalf("can't load qmail config: %v", err)
 	}
 
-	srv := smtpd.NewServer(cfg)
+	if len(os.Args) > 2 {
+		smtpdCfg.AuthFQDN = os.Args[1]
+		smtpdCfg.Auth = auth.NewVchkpwCommand(os.Args[2], os.Args[3:]...)
+	}
 
-	relayClient, relayClientOk := os.LookupEnv("RELAYCLIENT")
-	env := qmail.Env{
-		LocalIP:       cmp.Or(os.Getenv("TCPLOCALIP"), "unknown"),
-		LocalHost:     cmp.Or(os.Getenv("TCPLOCALHOST"), "unknown"),
-		RemoteIP:      cmp.Or(os.Getenv("TCPREMOTEIP"), "unknown"),
-		RemoteHost:    cmp.Or(os.Getenv("TCPREMOTEHOST"), "unknown"),
-		RemoteInfo:    "", // ignoring
-		RelayClient:   relayClient,
-		RelayClientOk: relayClientOk,
+	env := env.New(os.Environ())
+	for _, name := range []string{"TCPLOCALIP", "TCPREMOTEIP"} {
+		if env.Get(name) == "" {
+			log.Fatalf("%s must be defined", name)
+		}
 	}
 
 	conn := &pipeconn.Conn{
 		Reader:   os.Stdin,
 		Writer:   os.Stdout,
-		LocalIP:  pipeconn.Addr(env.LocalIP),
-		RemoteIP: pipeconn.Addr(env.RemoteIP),
+		LocalIP:  pipeconn.Addr(env.Get("TCPLOCALIP")),
+		RemoteIP: pipeconn.Addr(env.Get("TCPREMOTEIP")),
 	}
 
-	if err := srv.Run(conn, env); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	smtpServer := smtpd.NewServer(smtpdCfg)
+	if err := smtpServer.Handle(ctx, env, conn); err != nil {
 		log.Fatalf("run failed: %v", err)
 	}
 }
 
-func die_control() {
-	os.Stdout.WriteString("421 unable to read controls (#4.3.0)\r\n")
-	os.Exit(1)
-}
-
-func die_ipme() {
-	os.Stdout.WriteString("421 unable to figure out my IP addresses (#4.3.0)\r\n")
-	os.Exit(1)
-}
-
-func prepareConfig() *smtpd.Config {
-	var cfg smtpd.Config
-
-	if control.Init() == -1 {
-		die_control()
+func runServer() {
+	if *maxConns < 0 {
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, "maximum connections number must be positive\n\n")
+		usage()
+		os.Exit(1)
 	}
 
-	if s, r := control.Rldef("control/smtpgreeting", true, ""); r != 1 {
-		die_control()
-	} else {
-		cfg.Greeting = s
-	}
+	slog.SetDefault(newLogger())
 
-	if s, r := control.Rldef("control/localiphost", true, ""); r == -1 {
-		die_control()
-	} else if r == 1 {
-		cfg.LocalIPHost = s
-	}
-
-	cfg.Timeout = smtpd.DefaultTimeout
-	if i, r := control.ReadInt("control/timeoutsmtpd"); r == -1 {
-		die_control()
-	} else if r == 1 {
-		if i <= 0 {
-			i = 1
+	var tcpRules tcpserver.TCPRules
+	if *rulesFile != "" {
+		log.Printf("open %s", *rulesFile)
+		db, err := cdb.Open(*rulesFile)
+		if err != nil {
+			log.Fatal(err)
 		}
-		cfg.Timeout = time.Duration(i) * time.Second
+		defer db.Close()
+		tcpRules = tcprules.New(cdbAdapter{db})
 	}
 
-	if r := rcpthosts.Init(); r == -1 {
-		die_control()
-	} else if r == 1 {
-		cfg.RcptHosts = rcpthostsAdapter{}
-	}
-
-	if r := badmailfrom.Init(); r == -1 {
-		die_control()
-	} else if r == 1 {
-		cfg.BadMailFrom = badmailfromAdapter{}
-	}
-
-	if r := mbxhosts.Init(); r == -1 {
-		die_control()
-	} else if r == 1 {
-		cfg.MbxHosts = mbxhostsAdapter{}
-	}
-
-	if i, r := control.ReadInt("control/databytes"); r == -1 {
-		die_control()
-	} else if r == 1 {
-		cfg.Databytes = i
-	}
-
-	// x = env_get("DATABYTES");
-	// if (x) { scan_ulong(x,&u); databytes = u; }
-	// if (!(databytes + 1)) --databytes;  // WTF: if databytes == -1 then databytes = -2 ?
-	if x := os.Getenv("DATABYTES"); x != "" {
-		_, u := scan.ScanUlong(x)
-		if u != 0 {
-			cfg.Databytes = int(u)
+	var (
+		vchkpwPath string
+		vchkpwArgs []string
+	)
+	if args := flag.Args(); len(args) > 0 {
+		if p, err := filepath.Abs(args[0]); err == nil {
+			vchkpwPath = p
+		} else {
+			log.Fatal(err)
 		}
-	}
-	if cfg.Databytes+1 == 0 { // WTF?
-		cfg.Databytes--
+		vchkpwArgs = args[1:]
 	}
 
-	if !ipme.Init() {
-		die_ipme()
+	if err := os.Chdir(config.AutoQmail); err != nil {
+		log.Fatal(err)
 	}
-	cfg.IPMe = ipmeAdapter{}
 
-	cfg.Qmail = qmailAdapter{}
+	smtpdCfg, err := buildSMTPServerConfig()
+	if err != nil {
+		log.Fatalf("can't load qmail config: %v", err)
+	}
 
-	cert, err := tls.LoadX509KeyPair("control/servercert.pem", "control/servercert.pem")
+	if vchkpwPath != "" {
+		if *authFQDN != "" {
+			smtpdCfg.AuthFQDN = *authFQDN
+		}
+		smtpdCfg.Auth = auth.NewVchkpwCommand(vchkpwPath, vchkpwArgs...)
+	}
+
+	smtpServer := smtpd.NewServer(smtpdCfg)
+
+	handler := tcpserver.Handler{
+		LocalHost:     *localHost,
+		LookupRemote:  *lookupRemote,
+		LookupTimeout: 10 * time.Second,
+		Paranoid:      *paranoid,
+		TCPRules:      tcpRules,
+		Handler:       smtpServer,
+	}
+
+	tcpServer := tcpserver.Server{
+		MaxConns: *maxConns,
+		Handler:  handler,
+	}
+
+	log.Printf("server listen at %s", *serverAddr)
+	listner, err := net.Listen("tcp", *serverAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	cfg.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		s := <-c
+		log.Println("got signal:", s)
+		listner.Close()
+	}()
 
-	var logEnable bool
-	if i, r := control.ReadInt("control/smtplog"); r == -1 {
-		die_control()
+	if err := tcpServer.Serve(listner); err != nil && !errors.Is(err, net.ErrClosed) {
+		log.Fatalf("server failed: %v", err)
+	}
+
+	if err := tcpServer.WaitAllConnections(30 * time.Second); err != nil {
+		log.Fatalf("shutdown failed: %v", err)
+	}
+}
+
+func newLogger() *slog.Logger {
+	level := slog.LevelInfo
+	switch s := os.Getenv("LOG_LEVEL"); {
+	case strings.EqualFold(s, "DEBUG"):
+		level = slog.LevelDebug
+	case strings.EqualFold(s, "INFO"):
+		level = slog.LevelInfo
+	case strings.EqualFold(s, "WARN"):
+		level = slog.LevelWarn
+	case strings.EqualFold(s, "ERROR"):
+		level = slog.LevelError
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+type qmailAdapter struct{}
+
+func (qa qmailAdapter) Begin(fromMail string, rcptTo []string, env env.Env) (smtpd.Queue, error) {
+	return qmail.Begin(fromMail, rcptTo, env)
+}
+
+type rcptHostsDB struct{ cdb *cdb.CDB }
+
+func (c rcptHostsDB) Do(fn func(filters.RcptHostsFinder) error) error {
+	return c.cdb.Do(func(q *cdb.Query) error { return fn(q) })
+}
+
+func buildSMTPServerConfig() (smtpd.ServerConfig, error) {
+	var cfg smtpd.ServerConfig
+
+	if manager, err := config.NewManager(control.FileEngine{}); err != nil {
+		return smtpd.ServerConfig{}, err
 	} else {
-		logEnable = i != 0
-	}
-	if x := os.Getenv("SMTPLOG"); x != "" {
-		_, u := scan.ScanUlong(x)
-		logEnable = u != 0
-	}
-	if logEnable {
-		pid := os.Getpid()
-		cfg.Logger = &logAdapter{log1.Writer{
-			Out:    os.Stderr,
-			Prefix: fmt.Sprintf("smtp-log[%d]: ", pid),
-		}}
+		cfg.Manager = manager
 	}
 
-	return &cfg
+	cfg.Qmail = qmailAdapter{}
+
+	if cert, err := tls.LoadX509KeyPair("control/servercert.pem", "control/servercert.pem"); err != nil {
+		slog.Debug("load X509 key pair failed", "error", err)
+	} else {
+		cfg.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	}
+
+	if db, err := cdb.Open("control/morercpthosts.cdb"); err != nil {
+		if !os.IsNotExist(err) {
+			return smtpd.ServerConfig{}, err
+		}
+	} else {
+		cfg.RcptHostsDB = rcptHostsDB{db}
+	}
+
+	return cfg, nil
 }

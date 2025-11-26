@@ -1,5 +1,3 @@
-// == smtpd/auth_test.go ==
-
 package smtpd
 
 import (
@@ -7,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/pipeconn"
 	"qmail-smtpd/internal/smtpd/safeio"
 )
@@ -19,24 +18,21 @@ func Test_authHandler_challenge(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		cfg     *Config
-		state   sessionState
+		state   state
 		args    args
 		wantErr bool
 		wantOut string
 	}{
 		{
 			"<empty>",
-			&Config{},
-			sessionState{},
+			state{},
 			args{""},
 			false,
 			"334 \r\n", // <SP> required
 		},
 		{
 			"Hello, 世界",
-			&Config{},
-			sessionState{},
+			state{},
 			args{"Hello, 世界"},
 			false,
 			"334 SGVsbG8sIOS4lueVjA==\r\n",
@@ -53,13 +49,13 @@ func Test_authHandler_challenge(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
+			ss := session{
+				io:    safeio.New(conn, nil, 0),
+				state: tt.state,
 			}
-			auth := authHandler{cfg: tt.cfg}
+			auth := authHandler{}
 
-			err := auth.challenge(ss, tt.args.challenge)
+			err := auth.challenge(&ss, tt.args.challenge)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("%s: err = %v, want %v", op, err, tt.wantErr)
 			}
@@ -75,8 +71,7 @@ func Test_authHandler_response(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		cfg     *Config
-		state   sessionState
+		state   state
 		input   string
 		want    string
 		wantErr bool
@@ -84,8 +79,7 @@ func Test_authHandler_response(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Config{},
-			sessionState{},
+			state{},
 			"\r\n",
 			"",
 			false,
@@ -93,8 +87,7 @@ func Test_authHandler_response(t *testing.T) {
 		},
 		{
 			"no base64",
-			&Config{},
-			sessionState{},
+			state{},
 			"Hello, world!\r\n",
 			"",
 			true,
@@ -102,8 +95,7 @@ func Test_authHandler_response(t *testing.T) {
 		},
 		{
 			"base64",
-			&Config{},
-			sessionState{},
+			state{},
 			"SGVsbG8sIOS4lueVjA==\r\n",
 			"Hello, 世界",
 			false,
@@ -111,8 +103,7 @@ func Test_authHandler_response(t *testing.T) {
 		},
 		{
 			"*",
-			&Config{},
-			sessionState{},
+			state{},
 			"*\n",
 			"",
 			true,
@@ -120,8 +111,7 @@ func Test_authHandler_response(t *testing.T) {
 		},
 		{
 			"leader spaces",
-			&Config{},
-			sessionState{},
+			state{},
 			"  SGVsbG8sIOS4lueVjA==\r\n",
 			"",
 			true,
@@ -129,8 +119,7 @@ func Test_authHandler_response(t *testing.T) {
 		},
 		{
 			"finaller spaces",
-			&Config{},
-			sessionState{},
+			state{},
 			"SGVsbG8sIOS4lueVjA==  \r\n",
 			"",
 			true,
@@ -148,14 +137,14 @@ func Test_authHandler_response(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
+			ss := session{
+				io:    safeio.New(conn, nil, 0),
+				state: tt.state,
 			}
-			auth := authHandler{cfg: tt.cfg}
+			auth := authHandler{}
 
-			got, err := auth.response(ss)
-			ss.Flush()
+			got, err := auth.response(&ss)
+			ss.io.Flush()
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("%s: err = %v, want %v", op, err, tt.wantErr)
@@ -180,8 +169,7 @@ func Test_authHandler_login(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		cfg       *Config
-		state     sessionState
+		state     state
 		args      args
 		input     string
 		want      *credentials
@@ -190,8 +178,7 @@ func Test_authHandler_login(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Config{},
-			sessionState{},
+			state{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			&credentials{
@@ -204,8 +191,7 @@ func Test_authHandler_login(t *testing.T) {
 		},
 		{
 			"no username1",
-			&Config{},
-			sessionState{},
+			state{},
 			args{"="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			nil,
@@ -214,8 +200,7 @@ func Test_authHandler_login(t *testing.T) {
 		},
 		{
 			"no username2",
-			&Config{},
-			sessionState{},
+			state{},
 			args{""},
 			"\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			nil,
@@ -224,8 +209,7 @@ func Test_authHandler_login(t *testing.T) {
 		},
 		{
 			"no password",
-			&Config{},
-			sessionState{},
+			state{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZw==\r\n\r\n",
 			nil,
@@ -234,8 +218,7 @@ func Test_authHandler_login(t *testing.T) {
 		},
 		{
 			"vasya@pupkin.org",
-			&Config{},
-			sessionState{},
+			state{},
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			&credentials{
@@ -248,8 +231,7 @@ func Test_authHandler_login(t *testing.T) {
 		},
 		{
 			"abort",
-			&Config{},
-			sessionState{},
+			state{},
 			args{"dmFzeWFAcHVwa2luLm9yZw=="},
 			"*\r\n",
 			nil,
@@ -268,14 +250,14 @@ func Test_authHandler_login(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
+			ss := session{
+				io:    safeio.New(conn, nil, 0),
+				state: tt.state,
 			}
-			auth := authHandler{cfg: tt.cfg}
+			auth := authHandler{}
 
-			got, err := auth.login(ss, tt.args.arg)
-			ss.Flush()
+			got, err := auth.login(&ss, tt.args.arg)
+			ss.io.Flush()
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("%s: err = %v, want %v", op, err, tt.wantErr)
@@ -302,8 +284,8 @@ func Test_authHandler_plain(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		cfg       *Config
-		state     sessionState
+		session   session
+		state     state
 		args      args
 		input     string
 		want      *credentials
@@ -312,8 +294,8 @@ func Test_authHandler_plain(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Config{},
-			sessionState{},
+			session{},
+			state{},
 			args{""},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQ=\r\n",
 			&credentials{
@@ -326,8 +308,8 @@ func Test_authHandler_plain(t *testing.T) {
 		},
 		{
 			"argument",
-			&Config{},
-			sessionState{},
+			session{},
+			state{},
 			args{"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQ="},
 			"",
 			&credentials{
@@ -340,8 +322,8 @@ func Test_authHandler_plain(t *testing.T) {
 		},
 		{
 			"empty argument (=)",
-			&Config{},
-			sessionState{},
+			session{},
+			state{},
 			args{"="},
 			"MTIzNDUAdmFzeWFAcHVwa2luLm9yZwBteSBzdHJvbmcgcGFzc3dvcmQ=\r\n",
 			nil,
@@ -350,8 +332,8 @@ func Test_authHandler_plain(t *testing.T) {
 		},
 		{
 			"no response",
-			&Config{},
-			sessionState{},
+			session{},
+			state{},
 			args{""},
 			"\r\n",
 			nil,
@@ -360,8 +342,8 @@ func Test_authHandler_plain(t *testing.T) {
 		},
 		{
 			"abort",
-			&Config{},
-			sessionState{},
+			session{},
+			state{},
 			args{""},
 			"*\r\n",
 			nil,
@@ -380,14 +362,15 @@ func Test_authHandler_plain(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
-			}
-			auth := authHandler{cfg: tt.cfg}
 
-			got, err := auth.plain(ss, tt.args.arg)
-			ss.Flush()
+			ss := tt.session
+			ss.io = safeio.New(conn, nil, 0)
+			ss.state = tt.state
+
+			auth := authHandler{}
+
+			got, err := auth.plain(&ss, tt.args.arg)
+			ss.io.Flush()
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("%s: err = %v, want %v", op, err, tt.wantErr)
@@ -409,13 +392,17 @@ func Test_authHandler_cram(t *testing.T) {
 
 	type credentials = cramCredentials
 
+	type config struct {
+		authFQDN string
+	}
+
 	type args struct {
 		arg string
 	}
 	tests := []struct {
 		name      string
-		cfg       *Config
-		state     sessionState
+		cfg       config
+		state     state
 		args      args
 		input     string
 		want      *credentials
@@ -424,8 +411,8 @@ func Test_authHandler_cram(t *testing.T) {
 	}{
 		{
 			"<empty>",
-			&Config{Hostname: "mx.pupkin.org"},
-			sessionState{},
+			config{authFQDN: "mx.pupkin.org"},
+			state{},
 			args{""},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
 			&credentials{
@@ -437,8 +424,8 @@ func Test_authHandler_cram(t *testing.T) {
 		},
 		{
 			"empty argument (=)",
-			&Config{Hostname: "mx.pupkin.org"},
-			sessionState{},
+			config{authFQDN: "mx.pupkin.org"},
+			state{},
 			args{"="},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
 			nil,
@@ -447,8 +434,8 @@ func Test_authHandler_cram(t *testing.T) {
 		},
 		{
 			"no response",
-			&Config{},
-			sessionState{},
+			config{},
+			state{},
 			args{""},
 			"\r\n",
 			nil,
@@ -457,8 +444,8 @@ func Test_authHandler_cram(t *testing.T) {
 		},
 		{
 			"abort",
-			&Config{},
-			sessionState{},
+			config{},
+			state{},
 			args{""},
 			"*\r\n",
 			nil,
@@ -493,14 +480,14 @@ func Test_authHandler_cram(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
+			ss := session{
+				io:    safeio.New(conn, nil, 0),
+				state: tt.state,
 			}
-			auth := authHandler{cfg: tt.cfg}
+			auth := authHandler{authFQDN: tt.cfg.authFQDN}
 
-			got, err := auth.cram(ss, tt.args.arg)
-			ss.Flush()
+			got, err := auth.cram(&ss, tt.args.arg)
+			ss.io.Flush()
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("%s: err = %v, want %v", op, err, tt.wantErr)
@@ -525,8 +512,8 @@ func TestServer_smtp_auth(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		cfg       *Config
-		state     sessionState
+		session   session
+		state     state
 		args      args
 		input     string
 		wantErr   bool
@@ -534,8 +521,8 @@ func TestServer_smtp_auth(t *testing.T) {
 	}{
 		{
 			"login one line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login dmFzeWFAcHVwa2luLm9yZwo="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -543,8 +530,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"login multi line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -552,8 +539,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"login no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}},
+			state{},
 			args{"login dmFzeWFAcHVwa2luLm9yZwo="},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -561,8 +548,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain single line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo="},
 			"",
 			false,
@@ -570,8 +557,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain multi line",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"plain"},
 			"MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo=\r\n",
 			false,
@@ -579,8 +566,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"plain no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}},
+			state{},
 			args{"plain MTIzNDUAdmFzeWFAcHVwa2luAG15IHN0cm9uZyBwYXNzd29yZAo="},
 			"",
 			false,
@@ -588,8 +575,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"cram-md5 tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"cram-md5"},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
 			false,
@@ -597,8 +584,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"cram-md5 no tls",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}},
+			state{},
 			args{"cram-md5"},
 			"dmFzeWFAcHVwa2luLm9yZyAwMTIzNDU2Nzg5QUJDREVGMDEyMzQ1Njc4OWFiY2RlZg==\r\n",
 			false,
@@ -606,8 +593,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"argument not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login vasya@pupkin.org"},
 			"bXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -615,8 +602,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"first response not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"vasya@pupkin.org\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -624,8 +611,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"second response not base64",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nmy strong password\r\n",
 			false,
@@ -633,8 +620,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"canceled on first response",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"*\r\n",
 			false,
@@ -642,8 +629,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"canceled on second response",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: true}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: true}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\n*\r\n",
 			false,
@@ -651,8 +638,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"authorization failed",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: false}, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -660,8 +647,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"no auth",
-			&Config{Hostname: "localhost", Auth: nil},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: nil, tlsEnabled: true},
+			state{},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -669,8 +656,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"already authenticated",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
-			sessionState{tlsEnabled: true, authorized: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: false}, tlsEnabled: true},
+			state{authorized: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -678,8 +665,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"mail transaction",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
-			sessionState{tlsEnabled: true, seenmail: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: false}, tlsEnabled: true},
+			state{seenMail: true},
 			args{"login"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -687,8 +674,8 @@ func TestServer_smtp_auth(t *testing.T) {
 		},
 		{
 			"unknown mechanism",
-			&Config{Hostname: "localhost", Auth: &fakeAuth{ok: false}},
-			sessionState{tlsEnabled: true},
+			session{authFQDN: "localhost", auth: &fakeAuth{ok: false}, tlsEnabled: true},
+			state{},
 			args{"unknown"},
 			"dmFzeWFAcHVwa2luLm9yZwo=\r\nbXkgc3Ryb25nIHBhc3N3b3Jk\r\n",
 			false,
@@ -707,16 +694,16 @@ func TestServer_smtp_auth(t *testing.T) {
 				Reader: r,
 				Writer: w,
 			}
-			ss := &session{
-				SafeIO:       safeio.New(conn, nil, tt.cfg.Timeout),
-				sessionState: tt.state,
-			}
-			d := NewServer(tt.cfg)
 
-			oldAuthorized := ss.authorized
+			ss := tt.session
+			ss.env = env.New(nil)
+			ss.io = safeio.New(conn, nil, 0)
+			ss.state = tt.state
 
-			_ = d.smtp_auth(ss, tt.args.arg)
-			err := ss.Flush()
+			oldAuthorized := ss.state.authorized
+
+			_ = smtp_auth(&ss, tt.args.arg)
+			err := ss.io.Flush()
 			out := w.String()
 
 			var outShowed bool
@@ -739,12 +726,12 @@ func TestServer_smtp_auth(t *testing.T) {
 
 			successAuth := len(codes) > 0 && codes[len(codes)-1] == 235
 			wantAuthorized := successAuth || oldAuthorized
-			if ss.authorized != wantAuthorized {
+			if ss.state.authorized != wantAuthorized {
 				if !outShowed {
 					t.Logf("%s: out = %v", op, out)
 					outShowed = true
 				}
-				t.Errorf("%s: ss.authorized = %v, want %v", op, ss.authorized, wantAuthorized)
+				t.Errorf("%s: ss.authorized = %v, want %v", op, ss.state.authorized, wantAuthorized)
 			}
 		})
 	}

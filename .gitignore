@@ -3,6 +3,7 @@
 *.bin
 *.out
 *.pprof
+bin/
 tmp/
 bak/
 bak[0-9]/

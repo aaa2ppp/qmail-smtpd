@@ -1,5 +1,3 @@
-// == auth/vchkpw.go ==
-
 package auth
 
 import (
@@ -108,7 +106,7 @@ func execVchkpw(path string, args []string, username, password, challenge string
 	}
 	defer pr.Close()
 
-	cmd.ExtraFiles = []*os.File{pr} // ExtraFiles[0] becomes fd 3 in the child process
+	vchkpwSetupPipe(cmd, pr)
 
 	if err := cmd.Start(); err != nil {
 		pw.Close()

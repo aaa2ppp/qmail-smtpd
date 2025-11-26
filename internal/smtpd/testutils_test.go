@@ -2,26 +2,16 @@ package smtpd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
-	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
-	"qmail-smtpd/internal/pipeconn"
+	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/qmail"
-	"qmail-smtpd/internal/scan"
 )
-
-/*
-type alwaysAuth struct{}
-
-func (a alwaysAuth) Authenticate(_, _, _ string) bool { return true }
-
-type alwaysNoAuth struct{}
-
-func (a alwaysNoAuth) Auth(_, _, _ string) bool { return false }
-*/
 
 type fakeAuth struct {
 	ok bool
@@ -38,11 +28,11 @@ var _ Authenticator = &fakeAuth{}
 
 type alwaysMatch struct{}
 
-func (m alwaysMatch) Match(_ string) bool { return true }
+func (m alwaysMatch) Match(_ context.Context, _ string) bool { return true }
 
 type alwaysNotMatch struct{}
 
-func (m alwaysNotMatch) Match(_ string) bool { return false }
+func (m alwaysNotMatch) Match(_ context.Context, _ string) bool { return false }
 
 type fakeReader struct {
 	*strings.Reader
@@ -133,7 +123,7 @@ type fakeQueue struct {
 	commitErr  error
 }
 
-func (qq *fakeQueue) Begin(mailForm string, rcptTo []string, opts qmail.Env) (Queue, error) {
+func (qq *fakeQueue) Begin(mailForm string, rcptTo []string, env env.Env) (Queue, error) {
 	if qq.beginErr != nil {
 		return nil, qq.beginErr
 	}
@@ -194,8 +184,8 @@ func extractCodes(answers string) []int {
 			break
 		}
 
-		n, code := scan.ScanUlong(answers[pos:])
-		if n != 3 {
+		code, err := strconv.Atoi(answers[pos : pos+3])
+		if err != nil {
 			codes = append(codes, errSignal)
 		} else if answers[pos+3] == '-' {
 			// skip
@@ -229,19 +219,6 @@ func delCr(s string) string {
 		}
 	}
 	return strings.Join(a, "\n")
-}
-
-func createServerAndSessionWithRW(cfg *Config, state sessionState, r *fakeReader, w *fakeWriter) (*Server, *session) {
-	srv := NewServer(cfg)
-	conn := &pipeconn.Conn{
-		Reader: r,
-		Writer: w,
-	}
-	ss := srv.newSession(conn, qmail.Env{})
-	if !reflect.DeepEqual(state, sessionState{}) {
-		ss.sessionState = state
-	}
-	return srv, ss
 }
 
 // checkMsgID validates that s is a valid msg-id per RFC 5322.

@@ -2,7 +2,7 @@ package smtpd
 
 import "time"
 
-func issafe(ch byte) bool {
+func isSafe(ch byte) bool {
 	switch {
 	case ch == '.':
 		return true
@@ -30,46 +30,43 @@ func issafe(ch byte) bool {
 	return false
 }
 
-func safeput(qqt Queue, s string) {
+func safePut(qqt Queue, s string) {
 	for _, ch := range []byte(s) {
-		if !issafe(ch) {
+		if !isSafe(ch) {
 			ch = '?'
 		}
 		qqt.WriteByte(ch)
 	}
 }
 
-/* "Received: from relay1.uu.net (HELO uunet.uu.net) (7@192.48.96.5)\n" */
-/* "  by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000\n" */
+func received(qqt Queue, ss *session) error {
+	// Received: from relay1.uu.net (HELO uunet.uu.net) (7@192.48.96.5)
+	//   by silverton.berkeley.edu with SMTP; 26 Sep 1995 04:46:54 -0000
 
-func received(
-	qqt Queue,
-	protocol string,
-	local string,
-	remoteip string,
-	remotehost string,
-	remoteinfo string,
-	helo string,
-) error {
 	qqt.WriteString("Received: from ")
-	safeput(qqt, remotehost)
-	if helo != "" {
+	safePut(qqt, ss.remoteHosts)
+
+	if ss.state.heloHost != "" {
 		qqt.WriteString(" (HELO ")
-		safeput(qqt, helo)
+		safePut(qqt, ss.state.heloHost)
 		qqt.WriteString(")")
 	}
+
 	qqt.WriteString(" (")
-	if remoteinfo != "" {
-		safeput(qqt, remoteinfo)
+	if ss.state.username != "" {
+		safePut(qqt, ss.state.username)
 		qqt.WriteString("@")
 	}
-	safeput(qqt, remoteip)
+	safePut(qqt, ss.remoteIP)
 	qqt.WriteString(")\n  by ")
-	safeput(qqt, local)
+
+	safePut(qqt, ss.local)
 	qqt.WriteString(" with ")
-	qqt.WriteString(protocol)
+	qqt.WriteString(ss.proto)
 	qqt.WriteString("; ")
+
 	dt := time.Now()
 	qqt.WriteString(dt.Format("2 Jan 2006 15:04:05 -0700"))
+
 	return qqt.WriteByte('\n')
 }

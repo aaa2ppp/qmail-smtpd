@@ -2,113 +2,133 @@ package control
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
-
-	"qmail-smtpd/internal/scan"
 )
 
-var me string
-var meok bool
+func readLine(r io.Reader) (string, error) {
+	br := bufio.NewReader(r)
 
-func Init() int {
-	var r int
-	me, r = ReadLine("control/me")
-	if r == 1 {
-		meok = true
-	}
-	return r
-}
-
-func ReadLine(fn string) (string, int) {
-	fd, err := os.Open(fn)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return "", -1
-		}
-		return "", 0
-	}
-	defer fd.Close()
-
-	br := bufio.NewReader(fd)
-
-	sa, err := br.ReadString('\n')
+	line, err := br.ReadString('\n')
 	if err != nil && err != io.EOF {
-		return "", -1
+		return "", err
 	}
 
-	sa = strings.TrimSpace(sa)
-	return sa, 1
+	return strings.TrimRight(line, " \t\r\n"), nil
 }
 
-// TODO: rename ReadLineDef
-func Rldef(fn string, flagme bool, def string) (string, int) {
-	sa, r := ReadLine(fn)
-	if r != 0 {
-		return sa, r
+func readText(r io.Reader) ([]string, error) {
+	sc := bufio.NewScanner(r)
+
+	var lines []string
+	for sc.Scan() {
+		s := strings.TrimRight(sc.Text(), " \t\r\n")
+		if s != "" && s[0] != '#' {
+			lines = append(lines, s)
+		}
 	}
-	if flagme && meok {
-		return me, 1
+
+	if err := sc.Err(); err != nil {
+		return nil, err
 	}
-	if def != "" {
-		return def, 1
-	}
-	return "", 0
+
+	return lines, nil
 }
 
-func ReadInt(fn string) (int, int) {
-	line, r := ReadLine(fn)
-	switch r {
-	case 0:
-		return 0, 0
-	case -1:
-		return 0, -1
-	}
-	_, u := scan.ScanUlong(line)
-	if u == 0 { // WTF?
-		return 0, 0
-	}
-	return int(u), 1
+type Engine interface {
+	ReadLine(name string) (string, bool, error)
+	ReadText(name string) ([]string, bool, error)
 }
 
-func ReadFile(fn string, flagme bool) ([]string, int) {
-	fd, err := os.Open(fn)
+type FileEngine struct{}
+
+func (FileEngine) ReadLine(name string) (string, bool, error) {
+	fd, err := os.Open(name)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, -1
+		if os.IsNotExist(err) {
+			return "", false, nil
 		}
-		if flagme && meok {
-			return []string{me}, 1
-		}
-		return nil, 0
+		return "", false, err
 	}
 	defer fd.Close()
-	br := bufio.NewReader(fd)
 
-	var sa []string
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return sa, -1
+	s, err := readLine(fd)
+	return s, true, err
+}
+
+func (FileEngine) ReadText(name string) ([]string, bool, error) {
+	fd, err := os.Open(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
 		}
-		// if err == io.EOF && line == "" {
-		// 	return sa, 1
-		// }
-		line = strings.TrimSpace(line)
-		if len(line) > 0 && line[0] != '#' {
-			sa = append(sa, line)
-		}
-		if err == io.EOF {
-			return sa, 1
-		}
+		return nil, false, err
 	}
+	defer fd.Close()
+
+	ss, err := readText(fd)
+	return ss, true, err
 }
 
-func Me() string {
-	return me
+type Control struct {
+	engine Engine
+	me     string
 }
 
-func MeOk() bool {
-	return meok
+func New(engine Engine) (*Control, error) {
+	me, _, err := engine.ReadLine("control/me")
+	if err != nil {
+		return nil, err
+	}
+	if me == "" {
+		return nil, errors.New("control/me: must be non-empty")
+	}
+	return &Control{engine: engine, me: me}, nil
+}
+
+func (c *Control) Me() string {
+	return c.me
+}
+
+func (c *Control) ReadLineDef(name string, flagme bool, def string) (string, error) {
+	s, exists, err := c.engine.ReadLine(name)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return s, err
+	}
+	if flagme {
+		return c.me, nil
+	}
+	return def, nil
+}
+
+func (c *Control) ReadInt(name string) (int, error) {
+	s, exists, err := c.engine.ReadLine(name)
+	if err != nil {
+		return 0, err
+	}
+	if exists {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, err
+		}
+		return i, nil
+	}
+	return 0, nil
+}
+
+func (c *Control) ReadText(name string, flagme bool) ([]string, error) {
+	text, exists, err := c.engine.ReadText(name)
+	if err != nil {
+		return nil, err
+	}
+	if !exists && flagme {
+		return []string{c.me}, nil
+	}
+	return text, nil
 }

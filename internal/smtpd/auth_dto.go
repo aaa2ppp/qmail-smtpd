@@ -1,5 +1,3 @@
-// == smtpd/auth_dto.go ==
-
 package smtpd
 
 import "qmail-smtpd/internal/auth"

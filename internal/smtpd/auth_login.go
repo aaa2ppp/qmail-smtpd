@@ -1,5 +1,3 @@
-// == smtpd/auth_login.go ==
-
 package smtpd
 
 // login handles non-standard LOGIN mechanism (for backward compatibility)

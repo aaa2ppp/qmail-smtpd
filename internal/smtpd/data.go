@@ -6,15 +6,16 @@ import (
 	"strconv"
 	"time"
 
+	"qmail-smtpd/internal/logger"
 	"qmail-smtpd/internal/qmail"
 )
 
-func (d *Server) straynewline(ss *session) error {
+func strayNewLine(ss *session) error {
 	ss.out("451 See http://pobox.com/~djb/docs/smtplf.html.\r\n")
-	return cmp.Or(ss.Flush(), ErrStrayNewLine)
+	return cmp.Or(ss.io.Flush(), ErrStrayNewLine)
 }
 
-func (d *Server) acceptmessage(ss *session, qp int) error {
+func acceptMessage(ss *session, qp int) error {
 	when := time.Now()
 	_ = ss.out("250 ok ")
 	_ = ss.out(strconv.Itoa(int(when.Unix())))
@@ -23,22 +24,23 @@ func (d *Server) acceptmessage(ss *session, qp int) error {
 	return ss.out("\r\n")
 }
 
-func (d *Server) smtp_data(ss *session, _ string) error {
-	if !ss.seenmail {
-		return d.err_wantmail(ss)
+func smtp_data(ss *session, _ string) error {
+	if !ss.state.seenMail {
+		return err_wantmail(ss)
 	}
-	if len(ss.rcptto) == 0 {
-		return d.err_wantrcpt(ss)
+	if len(ss.state.rcptTo) == 0 {
+		return err_wantrcpt(ss)
 	}
-	ss.seenmail = false
+	ss.state.seenMail = false
 
-	if d.cfg.Qmail == nil {
-		return d.err_qqt(ss)
+	if ss.qmail == nil {
+		return err_qqt(ss)
 	}
 
-	qqt, err := d.cfg.Qmail.Begin(ss.mailfrom, ss.rcptto, ss.env)
+	qqt, err := ss.qmail.Begin(ss.state.mailFrom, ss.state.rcptTo, ss.env)
 	if err != nil {
-		return d.err_qqt(ss)
+		logger.FromContext(ss.ctx).Error("qmail.Begin", "error", err)
+		return err_qqt(ss)
 	}
 	defer qqt.Rollback()
 
@@ -46,21 +48,13 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 	if err := ss.out("354 go ahead\r\n"); err != nil {
 		return err
 	}
-	ss.Flush()
+	ss.io.Flush()
 
-	received(
-		qqt,
-		ss.env.Proto,
-		ss.env.LocalHost,
-		ss.env.RemoteIP,
-		ss.env.RemoteHost,
-		ss.env.RemoteInfo,
-		ss.fakehelo,
-	)
+	received(qqt, ss)
 
-	_, blastErr := d.blast(qqt, ss, ss.env.Databytes)
+	_, blastErr := blast(qqt, ss, ss.databytes)
 	if blastErr == ErrStrayNewLine {
-		return d.straynewline(ss)
+		return strayNewLine(ss)
 	}
 	// TODO: log received data bytes
 
@@ -85,7 +79,7 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 		}
 	}
 
-	if blastErr != nil {
+	if err := blastErr; err != nil {
 		switch err {
 		case ErrExceedingMaxHops:
 			return ss.out("554 too many hops, this message is looping (#5.4.6)\r\n")
@@ -95,5 +89,5 @@ func (d *Server) smtp_data(ss *session, _ string) error {
 		return err
 	}
 
-	return d.acceptmessage(ss, qp)
+	return acceptMessage(ss, qp)
 }

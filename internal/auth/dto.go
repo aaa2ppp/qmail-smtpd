@@ -1,5 +1,3 @@
-// == auth/dto.go ==
-
 package auth
 
 // Credentials интерфейс для всех типов учетных данных.

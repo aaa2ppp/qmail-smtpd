@@ -1,5 +1,3 @@
-// == smtpd/auth.go ==
-
 package smtpd
 
 import (
@@ -15,8 +13,6 @@ import (
 // - CRAM-MD5 (RFC 2195)
 // - LOGIN (non-standard, for backward compatibility)
 
-// NOTE: Consider moving to interfaces/ package in a separate refactoring.
-// This change should be atomic and focused solely on interface relocation.
 type Authenticator interface {
 	Authenticate(cred Credentials) (authResult, error)
 }
@@ -26,7 +22,8 @@ var errAuthRejected = errors.New("auth malformed or canceled")
 
 // authHandler handles SMTP authentication using various mechanisms
 type authHandler struct {
-	cfg *Config
+	auth     Authenticator
+	authFQDN string
 }
 
 // malformedInput sends 501 to client, always returns errAuthRejected or IO error
@@ -38,11 +35,11 @@ func (h authHandler) challenge(ss *session, challenge string) error {
 	_ = ss.out("334 ")
 	_ = ss.out(b64encode(challenge))
 	_ = ss.out("\r\n")
-	return ss.Flush()
+	return ss.io.Flush()
 }
 
 func (h authHandler) response(ss *session) (string, error) {
-	s, err := ss.ReadLine()
+	s, err := ss.io.ReadLine()
 	if err != nil {
 		return "", err
 	}
@@ -61,20 +58,19 @@ func (h authHandler) decodeResponse(ss *session, s string) (string, error) {
 }
 
 // smtp_auth handles SMTP AUTH command
-func (d *Server) smtp_auth(ss *session, arg string) error {
-	auth := authHandler{cfg: d.cfg}
-
+func smtp_auth(ss *session, arg string) error {
 	// Preliminary checks
-	if d.cfg.Auth == nil || d.cfg.Hostname == "" {
+	if ss.auth == nil || ss.authFQDN == "" {
 		return ss.out("503 auth not available (#5.3.3)\r\n")
 	}
-	if ss.authorized {
+	if ss.state.authorized {
 		return ss.out("503 you're already authenticated (#5.5.0)\r\n")
 	}
-	if ss.seenmail {
+	if ss.state.seenMail {
 		return ss.out("503 no auth during mail transaction (#5.5.0)\r\n")
 	}
 
+	auth := authHandler{ss.auth, ss.authFQDN}
 	mechanism, arg := parseCmdLine(arg)
 
 	// Select authentication mechanism
@@ -107,7 +103,7 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 		return err
 	}
 
-	res, err := d.cfg.Auth.Authenticate(cred)
+	res, err := ss.auth.Authenticate(cred)
 
 	if err != nil {
 		// Internal server error - log the details but don't expose to client
@@ -119,22 +115,28 @@ func (d *Server) smtp_auth(ss *session, arg string) error {
 		return ss.out("535 authentication credentials invalid (#5.7.0)\r\n")
 	}
 
-	d.setAuthorized(ss, res.Username)
+	setAuthorization(ss, res.Username)
 	return ss.out("235 ok, go ahead (#2.0.0)\r\n")
 }
 
-func (d *Server) setAuthorized(ss *session, username string) {
-	ss.authorized = true
-	ss.user = username
-	ss.env.RemoteInfo = username
-	ss.relayclient = ""
-	ss.relayclientok = true
+func setAuthorization(ss *session, username string) {
+	ss.state.authorized = true
+	ss.state.username = username
+	ss.state.relaySuffix = ""
+	ss.state.relayClient = true
+
+	ss.env.Set("TCPREMOTEINFO", username)
 }
 
-func (d *Server) resetAuthorized(ss *session) {
-	ss.authorized = false
-	ss.user = ""
-	ss.env.RemoteInfo = ""
-	ss.relayclient = ss.env.RelayClient
-	ss.relayclientok = ss.env.RelayClientOk
+func resetAuthorization(ss *session) {
+	ss.state.authorized = false
+	ss.state.username = ""
+	ss.state.relayClient = ss.relayClient
+	ss.state.relaySuffix = ss.relaySuffix
+
+	if ss.remoteInfo != "" {
+		ss.env.Set("TCPREMOTEINFO", ss.remoteInfo)
+	} else {
+		ss.env.Unset("TCPREMOTEINFO")
+	}
 }

@@ -8,11 +8,7 @@ import (
 	"net"
 	"os"
 	"time"
-
-	"qmail-smtpd/internal/smtpd/interfaces"
 )
-
-type LogWriter = interfaces.LogWriter
 
 type safeReader struct {
 	conn    net.Conn
@@ -55,14 +51,14 @@ type SafeIO struct {
 	timeout    time.Duration
 	r          *bufio.Reader
 	w          *bufio.Writer
-	logIn      LogWriter
-	logOut     LogWriter
+	logIn      *logWriter
+	logOut     *logWriter
 	logEnabled bool
 	tlsEnabled bool
 	autoFlush  bool
 }
 
-func New(conn net.Conn, logger LogWriter, timeout time.Duration) *SafeIO {
+func New(conn net.Conn, logger io.Writer, timeout time.Duration) *SafeIO {
 	conn.SetDeadline(time.Time{}) // disable all deadlines
 
 	w := bufio.NewWriter(&safeWriter{
@@ -75,10 +71,10 @@ func New(conn net.Conn, logger LogWriter, timeout time.Duration) *SafeIO {
 		timeout: timeout,
 	})
 
-	var logIn, logOut LogWriter
+	var logIn, logOut *logWriter
 	if logger != nil {
-		logIn = logger.WithPrefix("=> ")
-		logOut = logger.WithPrefix("<= ")
+		logIn = newLogWriter(logger, "=> ")
+		logOut = newLogWriter(logger, "<= ")
 	}
 
 	return &SafeIO{
