@@ -93,19 +93,19 @@ func New(conn net.Conn, logger io.Writer, timeout time.Duration) *SafeIO {
 // It returns a string (not []byte) with '\r\n' or '\n' stripped.
 // Unlike bufio.Reader.ReadLine, this method is safe to use and does not
 // return slices of an internal buffer.
-func (sio *SafeIO) ReadLine() (string, error) {
-	if sio.autoFlush {
-		if err := sio.Flush(); err != nil {
+func (cio *SafeIO) ReadLine() (string, error) {
+	if cio.autoFlush {
+		if err := cio.Flush(); err != nil {
 			return "", err
 		}
 	}
 
-	lineBytes, err := sio.r.ReadSlice('\n')
+	lineBytes, err := cio.r.ReadSlice('\n')
 
 	// logging input data, if any, before checking for errors
-	if sio.logEnabled && sio.logIn != nil && len(lineBytes) > 0 {
-		sio.logIn.WriteString(string(lineBytes))
-		sio.logIn.Flush()
+	if cio.logEnabled && cio.logIn != nil && len(lineBytes) > 0 {
+		cio.logIn.WriteString(string(lineBytes))
+		cio.logIn.Flush()
 	}
 
 	if err != nil {
@@ -123,26 +123,26 @@ func (sio *SafeIO) ReadLine() (string, error) {
 	return string(lineBytes[:n]), nil
 }
 
-func (sio *SafeIO) ReadByte() (byte, error) {
-	return sio.r.ReadByte()
+func (cio *SafeIO) ReadByte() (byte, error) {
+	return cio.r.ReadByte()
 }
 
-func (sio *SafeIO) WriteString(s string) (int, error) {
-	if sio.logOut != nil && sio.logEnabled {
-		sio.logOut.WriteString(s)
+func (cio *SafeIO) WriteString(s string) (int, error) {
+	if cio.logOut != nil && cio.logEnabled {
+		cio.logOut.WriteString(s)
 	}
-	return sio.w.WriteString(s)
+	return cio.w.WriteString(s)
 }
 
-func (sio *SafeIO) WriteByte(c byte) error {
-	return sio.w.WriteByte(c)
+func (cio *SafeIO) WriteByte(c byte) error {
+	return cio.w.WriteByte(c)
 }
 
-func (sio *SafeIO) Flush() error {
-	if sio.logOut != nil && sio.logEnabled {
-		sio.logOut.Flush()
+func (cio *SafeIO) Flush() error {
+	if cio.logOut != nil && cio.logEnabled {
+		cio.logOut.Flush()
 	}
-	return sio.w.Flush()
+	return cio.w.Flush()
 }
 
 // AutoFlush enables/disables automatic flushing of the output buffer
@@ -153,9 +153,9 @@ func (sio *SafeIO) Flush() error {
 // Auto flushing enabled by default. After server and client agreed
 // PIPELINING, AutoFlush should be disabled, and flushing should be
 // done explicitly.
-func (sio *SafeIO) AutoFlush(enable bool) bool {
-	old := sio.autoFlush
-	sio.autoFlush = enable
+func (cio *SafeIO) AutoFlush(enable bool) bool {
+	old := cio.autoFlush
+	cio.autoFlush = enable
 	return old
 }
 
@@ -163,37 +163,37 @@ func (sio *SafeIO) AutoFlush(enable bool) bool {
 // WriteString. Returns old value.
 //
 // It does not affect ReadByte or WriteByte (always no logging).
-func (sio *SafeIO) Logging(enabled bool) bool {
-	old := sio.logEnabled
-	sio.logEnabled = enabled
+func (cio *SafeIO) Logging(enabled bool) bool {
+	old := cio.logEnabled
+	cio.logEnabled = enabled
 	return old
 }
 
-func (sio *SafeIO) StartTLS(cfg *tls.Config) error {
-	if sio.tlsEnabled {
+func (cio *SafeIO) StartTLS(cfg *tls.Config) error {
+	if cio.tlsEnabled {
 		return errors.New("duplicate call StartTLS")
 	}
 
-	if err := sio.Flush(); err != nil {
+	if err := cio.Flush(); err != nil {
 		return err
 	}
 
-	conn := tls.Server(sio.conn, cfg)
+	conn := tls.Server(cio.conn, cfg)
 
 	w := bufio.NewWriter(&safeWriter{
 		conn:    conn,
-		timeout: sio.timeout,
+		timeout: cio.timeout,
 	})
 
 	r := bufio.NewReader(&safeReader{
 		conn:    conn,
-		timeout: sio.timeout,
+		timeout: cio.timeout,
 	})
 
-	sio.conn = conn
-	sio.r = r
-	sio.w = w
-	sio.tlsEnabled = true
+	cio.conn = conn
+	cio.r = r
+	cio.w = w
+	cio.tlsEnabled = true
 
 	return nil
 }
