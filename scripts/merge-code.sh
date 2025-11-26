@@ -6,11 +6,14 @@
 for dir in "$@"; do
     # Ищем файлы с нужными расширениями исключая пути
     find "$dir" -type f     \
-        ! -path './.*'      \
-        ! -path './tmp/*'   \
-        ! -path './bin/*'   \
-        ! -path './data/*'  \
-        ! -path './migrations/test/*' \
+        ! -path './qmail-src/*'      \
+        ! -path '*/.*'      \
+        ! -path '*/tmp/*'   \
+        ! -path '*/bak/*'   \
+        ! -path '*/bak[0-9]/*' \
+        ! -path '*/bin/*'   \
+        ! -path '*/data/*'  \
+        ! -path '*/migrations/test/*' \
         \( \
         -name 'LICENSE*'    \
         -o -name '*.go'     \

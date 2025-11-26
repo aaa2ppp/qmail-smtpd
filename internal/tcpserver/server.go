@@ -1,4 +1,4 @@
-package server
+package tcpserver
 
 import (
 	"context"
@@ -20,10 +20,10 @@ type ConnectionHandler interface {
 }
 
 type Server struct {
-	Env            env.Env
-	MaxConnections int // -c <num>
-	Handler        Handler
-	wg             sync.WaitGroup
+	Env      env.Env
+	MaxConns int // -c <num>
+	Handler  Handler
+	wg       sync.WaitGroup
 }
 
 func (srv *Server) logger() *slog.Logger {
@@ -38,7 +38,7 @@ func (srv *Server) Serve(listener net.Listener) error {
 	}
 
 	var sem semaphore
-	if n := srv.MaxConnections; n > 0 {
+	if n := srv.MaxConns; n > 0 {
 		sem = makeSemaphore(n)
 	}
 

@@ -1,9 +1,8 @@
 package smtpd
 
 import (
+	"net"
 	"strings"
-
-	"qmail-smtpd/internal/todo/scan"
 )
 
 func addrparse(arg string) (string, bool) {
@@ -60,14 +59,16 @@ func addrparse(arg string) (string, bool) {
 	if addr.Len() > 900 {
 		return "", false
 	}
+	
 	return addr.String(), true
 }
 
-func replaceLocalIP(addr, host string, ipme IPMe) string {
+func replaceLocalIP(addr, host string, ipme IPSet) string {
+	n := len(addr)
 	i := strings.LastIndexByte(addr, '@') + 1
-	if i != 0 && i < len(addr) && addr[i] == '[' {
-		l, ip := scan.ScanIPBracket(addr[i:])
-		if i+l == len(addr) && ipme.Is(ip) {
+	if i != 0 && i < n && addr[i] == '[' && addr[n-1] == ']' {
+		ip := net.ParseIP(addr[i+1 : n-1])
+		if ip != nil && ipme.Contains(ip) {
 			addr = addr[:i] + host
 		}
 	}

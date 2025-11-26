@@ -65,6 +65,18 @@ func (cdb *CDB) Reopen() error {
 	return nil
 }
 
+func (cdb *CDB) Find(key string) error {
+	cdb.mu.RLock()
+	defer cdb.mu.RUnlock()
+
+	if cdb.file == nil {
+		return errors.New("CDB is closed")
+	}
+
+	q := &Query{r: cdb.file}
+	return q.Find(key)
+}
+
 // Get - простой случай: значение по ключу
 func (cdb *CDB) Get(key string) (string, error) {
 	cdb.mu.RLock()
@@ -167,6 +179,8 @@ func (data fileMap) ReadAt(buf []byte, pos int64) (int, error) {
 	copy(buf, data[pos:])
 	return len(buf), nil
 }
+
+
 
 // Query — сессия поиска и чтения данных в CDB-файле.
 // Не потокобезопасна — должна использоваться в пределах одной горутины.

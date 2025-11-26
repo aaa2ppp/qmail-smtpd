@@ -17,7 +17,7 @@ func (h authHandler) cram(ss *session, arg string) (Credentials, error) {
 		return nil, h.malformedInput(ss)
 	}
 
-	challenge := generateCRAMChallenge(h.cfg.AuthFQDN)
+	challenge := generateCRAMChallenge(h.authFQDN)
 	if err := h.challenge(ss, challenge); err != nil {
 		return nil, err
 	}

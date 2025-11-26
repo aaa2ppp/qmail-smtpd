@@ -7,6 +7,9 @@ GOEXE := $(shell go env GOEXE)
 TEST_FLAGS ?=
 TEST_FLAGS := $(TEST_FLAGS) -tags=dev
 
+SERVER_ADDR ?= 127.0.0.1:2525
+SERVER_OPTS ?= 
+
 MERGE_FILES ?= Makefile go.mod go.sum *.go *.sh *.md
 
 # source and destination for merge/patch operations
@@ -23,7 +26,7 @@ CMDS := $(wildcard cmd/*)
 BINARIES := $(patsubst cmd/%,$(BIN_DIR)/%,$(CMDS))
 
 
-.PHONY: FORCE all deps test build clean
+.PHONY: FORCE all deps test build clean run
 
 FORCE:
 
@@ -51,6 +54,9 @@ build: $(BINARIES)
 clean:
 	-rm -rf $(BIN_DIR) $(TMP_DIR)
 
+
+run: $(AUTO_QMAIL)/bin/qmail-smtpd
+	AUTO_QMAIL=var/qmail var/qmail/bin/qmail-smtpd --addr=$(SERVER_ADDR) $(SERVER_OPTS)
 
 .PHONY: merge patch
 
@@ -86,7 +92,7 @@ patch: test
 	@echo "Patch saved to $(TMP_DIR)/$(DST).patch"
 
 
-.PHONY: qmail-tree qmail-test1 qmail-test-tls qmail-test-tcprules
+.PHONY: qmail-tree qmail-test1 qmail-test-tls qmail-test-tcprules qmail-test-env
 
 qmail-tree:
 	mkdir -p $(AUTO_QMAIL)

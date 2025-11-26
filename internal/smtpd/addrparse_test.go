@@ -1,10 +1,9 @@
 package smtpd
 
 import (
+	"net"
 	"strings"
 	"testing"
-
-	"qmail-smtpd/internal/todo/scan"
 )
 
 func Test_addrparse(t *testing.T) {
@@ -162,19 +161,17 @@ func Test_addrparse(t *testing.T) {
 	}
 }
 
-type alwaysIs struct{}
+type mockIPSet struct {
+	contains bool
+}
 
-func (a alwaysIs) Is(scan.IPAddress) bool { return true }
-
-type alwaysNotIs struct{}
-
-func (a alwaysNotIs) Is(scan.IPAddress) bool { return false }
+func (p mockIPSet) Contains(ip net.IP) bool { return p.contains }
 
 func Test_replaceLocalIP(t *testing.T) {
 	type args struct {
 		addr string
 		host string
-		ipme IPMe
+		ipme IPSet
 	}
 	tests := []struct {
 		name string
@@ -183,22 +180,22 @@ func Test_replaceLocalIP(t *testing.T) {
 	}{
 		{
 			"[+] vasya@[192.168.69.69]",
-			args{"vasya@[192.168.69.69]", "example.com", alwaysIs{}},
+			args{"vasya@[192.168.69.69]", "example.com", mockIPSet{contains: true}},
 			"vasya@example.com",
 		},
 		{
 			"[-] vasya@[192.168.69.69]",
-			args{"vasya@[192.168.69.69]", "example.com", alwaysNotIs{}},
+			args{"vasya@[192.168.69.69]", "example.com", mockIPSet{contains: false}},
 			"vasya@[192.168.69.69]",
 		},
 		{
 			"[-] vasya@192.168.69.69",
-			args{"vasya@192.168.69.69", "example.com", alwaysIs{}},
+			args{"vasya@192.168.69.69", "example.com", mockIPSet{contains: true}},
 			"vasya@192.168.69.69",
 		},
 		{
 			"[-] vasya@example.org",
-			args{"vasya@example.org", "example.com", alwaysIs{}},
+			args{"vasya@example.org", "example.com", mockIPSet{contains: true}},
 			"vasya@example.org",
 		},
 		// TODO: Add test cases.

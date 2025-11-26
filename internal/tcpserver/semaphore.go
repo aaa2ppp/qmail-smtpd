@@ -1,4 +1,4 @@
-package server
+package tcpserver
 
 type semaphore chan struct{}
 

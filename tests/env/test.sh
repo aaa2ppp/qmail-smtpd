@@ -99,7 +99,7 @@ func main() {
 EOF
 
 GOEXE=$(go env GOEXE)
-go build -o "$bin/server$GOEXE"   "$cmd/server"
+go build -o "$bin/qmail-smtpd$GOEXE"   "$cmd/qmail-smtpd"
 go build -o "$bin/tcprules$GOEXE" "$cmd/tcprules"
 go build -o "$bin/netcat$GOEXE"   "$cmd/netcat"
 go build -o "$bin/addcr$GOEXE"    "$cmd/addcr"
@@ -124,7 +124,7 @@ trap cleanup EXIT
 
 echo "Starting server..." >&2
 export EXTERNAL_VARIABLE="this variable was defined before starting the server"
-"$bin/server" -x "$control/tcp.2525.cdb" -h -addr 127.0.0.1:2525 "$bin/vchkpw" > "$server_log" 2>&1 &
+"$bin/qmail-smtpd" -x "$control/tcp.2525.cdb" -l example.org -h -addr 127.0.0.1:2525 "$bin/vchkpw" > "$server_log" 2>&1 &
 SERVER_PID=$!
 
 # wait server startup

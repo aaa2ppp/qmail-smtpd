@@ -2,25 +2,16 @@ package smtpd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"qmail-smtpd/internal/env"
 	"qmail-smtpd/internal/qmail"
-	"qmail-smtpd/internal/todo/scan"
 )
-
-/*
-type alwaysAuth struct{}
-
-func (a alwaysAuth) Authenticate(_, _, _ string) bool { return true }
-
-type alwaysNoAuth struct{}
-
-func (a alwaysNoAuth) Auth(_, _, _ string) bool { return false }
-*/
 
 type fakeAuth struct {
 	ok bool
@@ -37,11 +28,11 @@ var _ Authenticator = &fakeAuth{}
 
 type alwaysMatch struct{}
 
-func (m alwaysMatch) Match(_ string) bool { return true }
+func (m alwaysMatch) Match(_ context.Context, _ string) bool { return true }
 
 type alwaysNotMatch struct{}
 
-func (m alwaysNotMatch) Match(_ string) bool { return false }
+func (m alwaysNotMatch) Match(_ context.Context, _ string) bool { return false }
 
 type fakeReader struct {
 	*strings.Reader
@@ -193,8 +184,8 @@ func extractCodes(answers string) []int {
 			break
 		}
 
-		n, code := scan.ScanUlong(answers[pos:])
-		if n != 3 {
+		code, err := strconv.Atoi(answers[pos : pos+3])
+		if err != nil {
 			codes = append(codes, errSignal)
 		} else if answers[pos+3] == '-' {
 			// skip

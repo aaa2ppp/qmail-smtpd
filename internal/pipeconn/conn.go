@@ -12,6 +12,9 @@ var _ net.Conn = (*Conn)(nil)
 type Addr string
 
 func (a Addr) String() string {
+	if a == "" {
+		return "unknown"
+	}
 	return string(a)
 }
 
@@ -45,18 +48,10 @@ func (c *Conn) Close() error {
 }
 
 func (c *Conn) LocalAddr() net.Addr {
-	switch c.LocalIP {
-	case "", "unknown":
-		return nil
-	}
 	return c.LocalIP
 }
 
 func (c *Conn) RemoteAddr() net.Addr {
-	switch c.RemoteIP {
-	case "", "unknown":
-		return nil
-	}
 	return c.RemoteIP
 }
 

@@ -4,32 +4,31 @@ import (
 	"strings"
 )
 
-type handlerFunc = func(ss *session, arg string) error
+type commandFunc = func(ss *session, arg string) error
 
 type command struct {
-	handler   handlerFunc
+	name      string
+	handler   commandFunc
 	needFlush bool
 }
 
-type commandTable map[string]command
+type commands []command
 
-const unimpl = "*unimpl*"
-
-func newCommandTable(d *Server) commandTable {
-	return map[string]command{
-		"rcpt":     {d.smtp_rcpt, false},
-		"mail":     {d.smtp_mail, false},
-		"data":     {d.smtp_data, true},
-		"auth":     {d.smtp_auth, true},
-		"quit":     {d.smtp_quit, true},
-		"helo":     {d.smtp_helo, true},
-		"ehlo":     {d.smtp_ehlo, true},
-		"rset":     {d.smtp_rset, false},
-		"help":     {d.smtp_help, true},
-		"starttls": {d.smtp_tls, false},
-		"noop":     {d.err_noop, true},   // WTF: почему err_noop, а не smtp_noop?
-		"vrfy":     {d.err_vrfy, true},   // WTF: аналогично?
-		unimpl:     {d.err_unimpl, true}, // WTF: аналогично?
+func newSMTPCommands() commands {
+	return []command{
+		{"rcpt", smtp_rcpt, false},
+		{"mail", smtp_mail, false},
+		{"data", smtp_data, true},
+		{"auth", smtp_auth, true},
+		{"quit", smtp_quit, true},
+		{"helo", smtp_helo, true},
+		{"ehlo", smtp_ehlo, true},
+		{"rset", smtp_rset, false},
+		{"help", smtp_help, true},
+		{"starttls", smtp_starttls, false},
+		{"noop", smtp_noop, true}, // WTF: почему err_noop, а не smtp_noop?
+		{"vrfy", smtp_vrfy, true}, // WTF: аналогично?
+		{"", smtp_unimpl, true},   // default; WTF: аналогично?
 	}
 }
 
@@ -38,21 +37,25 @@ func parseCmdLine(line string) (name, arg string) {
 	if p == -1 {
 		p = len(line)
 	}
-	return strings.ToLower(line[:p]), strings.TrimSpace(line[p:])
+	return line[:p], strings.TrimSpace(line[p:])
 }
 
-func (d *Server) commandLoop(ss *session) error {
+func (c commands) get(name string) command {
+	i := 0
+	for ; i < len(c)-1 && !strings.EqualFold(c[i].name, name); i++ {
+	}
+	return c[i]
+}
+
+func (c commands) loop(ss *session) error {
 	for {
-		line, err := ss.ReadLine()
+		line, err := ss.io.ReadLine()
 		if err != nil {
 			return err
 		}
 
 		name, arg := parseCmdLine(line)
-		cmd, ok := d.cmdTable[name]
-		if !ok {
-			cmd = d.cmdTable[unimpl]
-		}
+		cmd := c.get(name)
 
 		if err := cmd.handler(ss, arg); err != nil {
 			return err
@@ -62,7 +65,7 @@ func (d *Server) commandLoop(ss *session) error {
 			continue
 		}
 
-		if err := ss.Flush(); err != nil {
+		if err := ss.io.Flush(); err != nil {
 			return err
 		}
 	}
