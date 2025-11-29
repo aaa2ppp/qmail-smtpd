@@ -81,12 +81,12 @@ func smtp_auth(ss *session, arg string) error {
 
 	switch strings.ToLower(mechanism) {
 	case "login":
-		if !ss.tlsEnabled {
+		if !ss.tlsEnabled && !ss.unsafeAuth {
 			return ss.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
 		cred, err = auth.login(ss, arg)
 	case "plain":
-		if !ss.tlsEnabled {
+		if !ss.tlsEnabled && !ss.unsafeAuth {
 			return ss.out("504 auth type unimplemented (#5.5.1)\r\n")
 		}
 		cred, err = auth.plain(ss, arg)

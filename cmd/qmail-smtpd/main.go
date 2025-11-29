@@ -29,6 +29,8 @@ import (
 	"qmail-smtpd/internal/tcpserver"
 )
 
+const qmaildUser = "qmaild"
+
 type cdbAdapter struct{ cdb *cdb.CDB }
 
 func (c cdbAdapter) Do(fn func(tcprules.Getter) error) error {
@@ -65,6 +67,8 @@ func main() {
 		usage()
 		return
 	}
+
+	slog.SetDefault(newLogger())
 
 	if *serverAddr != "" {
 		runServer()
@@ -120,8 +124,6 @@ func runServer() {
 		usage()
 		os.Exit(1)
 	}
-
-	slog.SetDefault(newLogger())
 
 	var tcpRules tcpserver.TCPRules
 	if *rulesFile != "" {
@@ -183,6 +185,12 @@ func runServer() {
 	listner, err := net.Listen("tcp", *serverAddr)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if os.Getuid() == 0 {
+		if err := dropPrivilegesToUser(qmaildUser); err != nil {
+			log.Fatalf("can't drop privileges: %v", err)
+		}
 	}
 
 	go func() {

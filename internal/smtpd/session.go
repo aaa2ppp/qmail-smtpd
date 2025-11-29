@@ -59,6 +59,7 @@ type session struct {
 
 	auth        Authenticator
 	authFQDN    string
+	unsafeAuth  bool
 	relayClient bool
 	relaySuffix string
 

@@ -1,6 +1,8 @@
 QMAIL     := qmail-1.03
 NETQMAIL  := netqmail-1.06
+VPOPMAIL  := vpopmail-5.4.33
 UCSPI_TCP := ucspi-tcp-0.88
+ALL       := $(QMAIL) $(NETQMAIL) $(VPOPMAIL) $(UCSPI_TCP)
 NAME      ?= $(NETQMAIL)
 MD5       := ./md5.sh
 
@@ -10,7 +12,7 @@ all: unpack
 
 
 .fetch-$(NAME):
-	curl `cat $(NAME).tar.gz.url` -o $(NAME).tar.gz
+	curl `cat $(NAME).tar.gz.url` -Lo $(NAME).tar.gz
 	touch .fetch-$(NAME)
 
 $(MD5):
@@ -21,7 +23,8 @@ $(MD5):
 	touch .check-$(NAME)
 
 .unpack-$(NAME): .check-$(NAME)
-	tar -xz -f $(NAME).tar.gz
+	mkdir -p ./src
+	tar -xz -C ./src -f $(NAME).tar.gz
 	touch .unpack-$(NAME)
 
 fetch: .fetch-$(NAME)
@@ -30,8 +33,14 @@ check: .check-$(NAME)
 
 unpack: .unpack-$(NAME)
 
-clean-all:
-	rm -fr *.tar.gz $(QMAIL) $(NETQMAIL) .fetch-* .check-* .unpack-* $(MD5)
+clean-one:
+	rm -fr ./src/$(NAME)/ $(NAME).tar.gz .*-$(NAME)
 
-clean-src:
-	rm -fr $(QMAIL) $(NETQMAIL) .unpack-*
+clean-one-src:
+	rm -fr ./src/$(NAME)/ .unpack-*
+
+clean-all:
+	rm -fr *.tar.gz $(patsubst %,./src/'%'/,$(ALL)) .fetch-* .check-* .unpack-* $(MD5)
+
+clean-all-src:
+	rm -fr ./src/ .unpack-*

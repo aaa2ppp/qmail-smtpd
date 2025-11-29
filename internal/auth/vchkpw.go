@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 )
 
 // Implementation of protocol for external authentication command (vckpw):
@@ -18,18 +19,19 @@ import (
 //
 // Max total length of credentials data must be less or equal than [VchkpwMaxAuthSize] bytes.
 //
-// vchkpw command exit codes:
-//   - 0: authentication successful
-//   - 1: forbidden
-//   - 3: authentication failed
-//   - Other: internal error (will be logged)
-//
 // Security: credentials are passed via pipe, not through command-line
 // arguments or environment variables.
 type VchkpwCommand struct {
 	path string
 	args []string
 }
+
+// vchkpw command exit codes:
+//   - 0: authentication successful
+//   - 1: forbidden (VLOG_ERROR_ACCESS)
+//   - 3, ...: authentication failed (VLOG_ERROR_LOGON or VLOG_ERROR_PASSWD)
+//   - Other: internal error (will be logged)
+var VchkpwAuthFailed = []int{1, 3, 12, 13, 20, 21, 22, 23}
 
 // Max total length of credentials data for vchkpw authentication.
 // Credentials are passed as three null-terminated strings:
@@ -51,7 +53,7 @@ func NewVchkpwCommand(path string, args ...string) *VchkpwCommand {
 //   - (Result, error): Authentication failed due to backend error (command execution failed,
 //     system error, etc.). The error indicates our internal problems, not invalid credentials.
 func (a *VchkpwCommand) Authenticate(cred Credentials) (Result, error) {
-	const op = "Command.Authenticate"
+	const op = "VchkpwCommand.Authenticate"
 
 	var (
 		username  string
@@ -147,7 +149,7 @@ func execVchkpw(path string, args []string, username, password, challenge string
 		if code == -1 {
 			return false, fmt.Errorf("%s terminated by signal", path)
 		}
-		if code == 1 || code == 3 { // forbidden or authentication failed
+		if slices.Contains(VchkpwAuthFailed, code) { // forbidden or authentication failed
 			return false, nil
 		}
 		return false, fmt.Errorf("%s exited with code %d", path, code)

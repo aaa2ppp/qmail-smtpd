@@ -65,7 +65,7 @@ func smtp_ehlo(ss *session, arg string) error {
 	_ = smtp_greet(ss, "250-")
 
 	if ss.auth != nil && !ss.state.authorized {
-		if ss.tlsEnabled {
+		if ss.tlsEnabled || ss.unsafeAuth {
 			_ = ss.out("\r\n250-AUTH LOGIN CRAM-MD5 PLAIN")
 			_ = ss.out("\r\n250-AUTH=LOGIN CRAM-MD5 PLAIN") // WTF? =
 		} else {

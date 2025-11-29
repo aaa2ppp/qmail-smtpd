@@ -129,7 +129,11 @@ func (srv *Server) setupSession(ctx context.Context, env env.Env, conn net.Conn)
 	cfg := srv.cfg.Manager.Get()
 
 	var logWrtr io.Writer
-	if cfg.SMTPLog {
+	smtplog := cfg.SMTPLog
+	if i, err := strconv.Atoi(env.Get("SMTPLOG")); err == nil && (i == 0 || i == 1) {
+		smtplog = (i != 0)
+	}
+	if smtplog {
 		log := logger.FromContext(ctx)
 		if log.Enabled(ctx, slog.LevelDebug) {
 			logWrtr = &logWriter{ctx, log}
@@ -192,6 +196,10 @@ func (srv *Server) setupSession(ctx context.Context, env env.Env, conn net.Conn)
 
 	ss.remoteInfo = env.Get("TCPREMOTEINFO")
 	ss.relaySuffix, ss.relayClient = env.Lookup("RELAYCLIENT")
+
+	if i, err := strconv.Atoi(env.Get("UNSAFE_AUTH")); err == nil && (i == 0 || i == 1) {
+		ss.unsafeAuth = (i != 0)
+	}
 
 	return ss
 }
